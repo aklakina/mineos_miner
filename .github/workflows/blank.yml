@@ -35,8 +35,9 @@ jobs:
           default: 5.4.6
           # Lua versions to install.
           lua_versions: 5.4.6
-          # LuaRocks versions to install.
-          #luarocks_versions: 3.9.2
+
+      - name: Install LuaRocks (latest)
+        uses: jkl1337/gh-actions-luarocks@v5
     
       - name: Install luaunit
         run: luarocks install luaunit
