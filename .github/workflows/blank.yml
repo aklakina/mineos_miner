@@ -34,4 +34,4 @@ jobs:
       - name: Lua Busted
         uses: lunarmodules/busted@v2.2.0
         with:
-          args: $GITHUB_WORKSPACE/build/unitTest.lua
+          args: $GITHUB_WORKSPACE/build/unitTests.lua
