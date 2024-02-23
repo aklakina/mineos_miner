@@ -36,7 +36,7 @@ jobs:
           # Lua versions to install.
           lua_versions: 5.4.6
           # LuaRocks versions to install.
-          luarocks_versions: 3.9.2
+          #luarocks_versions: 3.9.2
     
       - name: Install luaunit
         run: luarocks install luaunit
