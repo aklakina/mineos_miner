@@ -14,15 +14,36 @@ blockType = {
     WASTE = {},
     FUEL = {},
     OTHER = {},
+    BLOCKER = {},
+    AIR = {},
     UNKNOWN = {}
 }
 
 Environment = {
     checkedBlocks = {},
     wasteBlocks = {},
+    blockers = {},
     fuels = {},
     fuelLocations = {}
 }
+
+function Environment:getBlockAtPosition(coordinate)
+    if getmetatable(coordinate) ~= Coordinate then
+        coordinate = Coordinate.parse(coordinate)
+    end
+    local blockType = self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] or blockType.UNKNOWN
+    return blockType
+end
+
+function Environment:getNeighbours(coordinate)
+    local neighbours = {}
+    for _, v in pairs(directions) do
+        local neighbour = coordinate + v.vector
+        local blockType = self:getBlockAtPosition(neighbour)
+        table.insert(neighbours, {[v] = {position = neighbour, type = blockType}})
+    end
+    return neighbours
+end
 
 -- load wasteBlocks from file
 local function loadWasteBlocks()
@@ -48,6 +69,18 @@ local function loadFuels()
     end
     file:close()
     logger:debug("Finished loading fuels from file")
+end
+
+local function loadBlockers()
+    logger:debug("Starting to load blockers from file")
+    local file = io.open("blockers", "r")
+    local line = file:read()
+    while line do
+        table.insert(Environment.blockers, line)
+        line = file:read()
+    end
+    file:close()
+    logger:debug("Finished loading blockers from file")
 end
 
 loadWasteBlocks()
@@ -85,18 +118,21 @@ function Environment:isBlockChecked(coordinate)
     return result
 end
 
-function Environment:insertCoordToCheckedBlocks(coordinate)
+function Environment:insertCoordToCheckedBlocks(coordinate, blockType)
     logger:debug("Inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
     self.checkedBlocks[coordinate.y] = self.checkedBlocks[coordinate.y] or {}
     self.checkedBlocks[coordinate.y][coordinate.x] = self.checkedBlocks[coordinate.y][coordinate.x] or {}
-    self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] = true
+    self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] = blockType
     logger:debug("Finished inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
 end
 
 function Environment:checkBlockType(block_type)
+    if not block_type then
+        return blockType.AIR
+    end
     logger:debug("Checking block type for " .. tostring(block_type))
     if self.wasteBlocks[block_type] then
         logger:debug("Block type for " .. tostring(block_type) .. " is WASTE")
@@ -119,9 +155,9 @@ function Environment:checkBlock(coordinate, block_type)
         logger:debug("Block at coordinate " .. tostring(coordinate) .. " is a waste block")
         return blockType.WASTE
     end
-    self:insertCoordToCheckedBlocks(coordinate)
+    local blockType = self:checkBlockType(block_type)
+    self:insertCoordToCheckedBlocks(coordinate, blockType)
     if block_type then
-        local blockType = self:checkBlockType(block_type)
         logger:debug("Block at coordinate " .. tostring(coordinate) .. " is of type " .. tostring(blockType))
         return blockType
     end
@@ -138,4 +174,70 @@ function Environment:storeFuelLocation(coordinate)
     self.fuelLocations[coordinate.y][coordinate.x] = self.fuelLocations[coordinate.y][coordinate.x] or {}
     self.fuelLocations[coordinate.y][coordinate.x][coordinate.z] = true
     logger:debug("Finished storing fuel location at coordinate " .. tostring(coordinate))
+end
+
+function Environment:dijkstra(source, target)
+    local distance = {}
+    local previous = {}
+    local queue = BinaryHeap:new()
+
+    for y, row in pairs(self.checkedBlocks) do
+        for x, column in pairs(row) do
+            for z, blockType in pairs(column) do
+                local coordinate = Coordinate:new(x, y, z)
+                if coordinate == source then
+                    distance[coordinate] = 0
+                else
+                    distance[coordinate] = math.huge
+                end
+                queue:insert(coordinate, distance[coordinate] + self:heuristic(coordinate, target))
+            end
+        end
+    end
+
+    while not queue:isEmpty() do
+        local current = queue:pop()
+
+        if current == target then
+            break
+        end
+
+        for direction, data in pairs(self:getNeighbours(current)) do
+            local alt = distance[current] + self:getCost(data.type)
+            if alt < distance[data.position] then
+                distance[data.position] = alt
+                previous[data.position] = current
+                queue:decreaseKey(data.position, alt + self:heuristic(data.position, target))
+            end
+        end
+    end
+
+    local path = {}
+    local u = target
+    if previous[u] or u == source then
+        while u do
+            table.insert(path, 1, Distance:new(previous[u], u))
+            u = previous[u]
+        end
+    end
+
+    return path
+end
+
+function Environment:getCost(blockType)
+    if blockType == blockType.FUEL or blockType == blockType.AIR then
+        return 1
+    elseif blockType == blockType.WASTE or blockType == blockType.OTHER then
+        return 10
+    else
+        return math.huge
+    end
+end
+
+-- Add a heuristic function to estimate the cost from the current node to the target
+function Environment:heuristic(current, target)
+    local dx = math.abs(current.x - target.x)
+    local dy = math.abs(current.y - target.y)
+    local dz = math.abs(current.z - target.z)
+    return dx + dy + dz -- Use Manhattan distance as the heuristic
 end

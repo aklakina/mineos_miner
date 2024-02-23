@@ -2,7 +2,7 @@ rm -rf ./build
 rm -rf ./compiled
 mkdir ./build
 mkdir ./compiled
-find . -name "*.lua" -type f ! -path "./compiled/*" | while read -r file
+find . -name "*.lua" -type f ! -path "./compiled/*" ! -path "./.luarocks/*" | while read -r file
 do
     # Extract the base name of the file
     base=$(basename "$file")

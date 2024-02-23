@@ -236,28 +236,7 @@ function main()
 end
 
 function isOk()
-    local okLevel = findMaxLevel() / 2 + 10
     while ok do
-        local currentLevel = betterTurtle.getFuelLevel()
-        if currentLevel < 100 then --check fuel
-            print( "[isOk]: Fuel Level Low!" )
-            if betterTurtle.getItemCount( 16 ) > 0 then
-                print( "[isOk]: Refueling!" )
-                repeat
-                    betterTurtle.select( 16 )
-                until betterTurtle.refuel( 1 ) or betterTurtle.getSelectedSlot() == 16
-                if betterTurtle.getFuelLevel() > currentLevel then
-                    print( "[isOk]: Refuel Successful!" )
-                else
-                    print( "[isOk]: Refuel Unsuccessful, Initiating return!" )
-                    ok = false
-                end
-            end
-        elseif okLevel - ignoredFuel > findMaxLevel()  then
-            print("[isOk]: Fuel Reserves Depleted!  Initiating return!")
-            ok = false
-        end
-        --make sure betterTurtle can take new items
         local hasSpace = false
         for i = 14, 1, -1 do
             if betterTurtle.getItemCount( i ) == 0 then

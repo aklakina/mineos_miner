@@ -72,6 +72,49 @@ function TestDistance:testGetDistance()
     lu.assertEquals(distance:getAbsolute(), math.sqrt(27))
 end
 
+require('binaryHeap')
+
+TestBinaryHeap = {}
+
+function TestBinaryHeap:setUp()
+    self.binaryHeap = BinaryHeap:new()
+end
+
+function TestBinaryHeap:testInsert()
+    self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.x, 1)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.y, 2)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.z, 3)
+    lu.assertEquals(self.binaryHeap.heap[1].priority, 1)
+end
+
+function TestBinaryHeap:testPop()
+    self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
+    self.binaryHeap:insert(Coordinate:new(4, 5, 6), 2)
+    local coordinate = self.binaryHeap:pop()
+    lu.assertEquals(coordinate.x, 1)
+    lu.assertEquals(coordinate.y, 2)
+    lu.assertEquals(coordinate.z, 3)
+end
+
+function TestBinaryHeap:testDecreaseKeys()
+    local coordinate1 = Coordinate:new(1, 2, 3)
+    local coordinate2 = Coordinate:new(4, 5, 6)
+    self.binaryHeap:insert(coordinate1, 2)
+    self.binaryHeap:insert(coordinate2, 2)
+    self.binaryHeap:decreaseKey(coordinate2, 1)
+    local poppedCoordinate = self.binaryHeap:pop()
+    lu.assertEquals(poppedCoordinate.x, 4)
+    lu.assertEquals(poppedCoordinate.y, 5)
+    lu.assertEquals(poppedCoordinate.z, 6)
+end
+
+function TestBinaryHeap:testIsEmpty()
+    lu.assertTrue(self.binaryHeap:isEmpty())
+    self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
+    lu.assertFalse(self.binaryHeap:isEmpty())
+end
+
 require('environment')
 
 TestEnvironment = {}
@@ -80,7 +123,7 @@ function TestEnvironment:testIsBlockCheckedWithCheckedBlock()
     local environment = Environment:new()
     local coordinate = Coordinate:new(1, 2, 3, directions.forward)
     environment:insertCoordToCheckedBlocks(coordinate)
-    lu.assertTrue(environment:isBlockChecked(coordinate))
+    lu.assertNotEquals(environment:isBlockChecked(coordinate), nil)
 end
 
 function TestEnvironment:testIsBlockCheckedWithUncheckedBlock()
@@ -310,6 +353,42 @@ function TestBetterTurtle:testFindMaxLevelWithNoLavaInSlot15()
     self.betterTurtle.getFuelLevel = function() return 100 end
     local maxFuel = self.betterTurtle:findMaxLevel()
     lu.assertEquals(maxFuel, 100)
+end
+
+function TestEnvironment:testDijkstraWithPopulatedCheckedBlocks()
+    local environment = Environment:new()
+    local source = Coordinate:new(1, 2, 3)
+    local target = Coordinate:new(4, 5, 6)
+    environment.checkedBlocks = {
+        [2] = {
+            [1] = { [3] = blockType.AIR },
+            [2] = { [3] = blockType.AIR },
+            [3] = { [3] = blockType.AIR },
+            [4] = { [3] = blockType.AIR },
+            [5] = { [3] = blockType.AIR },
+            [6] = { [3] = blockType.AIR }
+        }
+    }
+    local path = environment:dijkstra(source, target)
+    lu.assertEquals(#path, 3)
+    lu.assertEquals(path[1].from.x, 1)
+    lu.assertEquals(path[1].from.y, 2)
+    lu.assertEquals(path[1].from.z, 3)
+    lu.assertEquals(path[1].to.x, 2)
+    lu.assertEquals(path[1].to.y, 2)
+    lu.assertEquals(path[1].to.z, 3)
+    lu.assertEquals(path[2].from.x, 2)
+    lu.assertEquals(path[2].from.y, 2)
+    lu.assertEquals(path[2].from.z, 3)
+    lu.assertEquals(path[2].to.x, 3)
+    lu.assertEquals(path[2].to.y, 2)
+    lu.assertEquals(path[2].to.z, 3)
+    lu.assertEquals(path[3].from.x, 3)
+    lu.assertEquals(path[3].from.y, 2)
+    lu.assertEquals(path[3].from.z, 3)
+    lu.assertEquals(path[3].to.x, 4)
+    lu.assertEquals(path[3].to.y, 2)
+    lu.assertEquals(path[3].to.z, 3)
 end
 
 os.exit(lu.LuaUnit.run())

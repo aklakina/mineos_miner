@@ -98,7 +98,12 @@ function Coordinate.parse(o)
         else
             error("Invalid arguments for Coordinate.parse")
         end
+    elseif getmetatable(o) == Coordinate then
+        return o
+    elseif o == nil then
+        return nil
     else
+        logger:error("Invalid arguments for Coordinate.parse, got: " .. type(o))
         error("Invalid arguments for Coordinate.parse")
     end
 end
@@ -151,11 +156,16 @@ function Coordinate:__tostring()
 end
 
 function Coordinate:__eq(o, t)
-    if not (getmetatable(t) == Coordinate) then
+    if getmetatable(t) ~= Coordinate then
         t = Coordinate.parse(t)
     end
-    if not (getmetatable(o) == Coordinate) then
+    if getmetatable(o) ~= Coordinate then
         o = Coordinate.parse(o)
+    end
+    if o == t == nil then
+        return true
+    elseif o == nil or t == nil then
+        return false
     end
     return o.x == t.x and o.y == t.y and o.z == t.z
 end
