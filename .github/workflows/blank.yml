@@ -47,4 +47,4 @@ jobs:
         run: ./build.sh
 
       - name: Run lua unit tests
-        run: cd ./build && lua unitTests.lua
+        run: cd ./build && /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin/lua unitTests.lua
