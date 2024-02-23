@@ -169,6 +169,25 @@ TestBetterTurtle = {}
 function TestBetterTurtle:setUp()
     self.betterTurtle = BetterTurtle:new()
     turtle.reset()
+    self.itemFuelValue = 100
+    self.selectedSlot = 1
+    self.betterTurtle.select = function(slot)
+        self.selectedSlot = slot
+        if slot == 15 then
+            self.itemFuelValue = 1000
+        else
+            self.itemFuelValue = 100
+        end
+    end
+    self.betterTurtle.refuel = function()
+        local itemCount = self.betterTurtle.getItemCount(self.selectedSlot)
+        if itemCount == 0 then
+            return false
+        end
+        local fuelLevel = self.betterTurtle.getFuelLevel()
+        self.betterTurtle.getFuelLevel = function() return fuelLevel + self.itemFuelValue end
+        self.betterTurtle.getItemCount = function() return itemCount - 1 end
+    end
     logger:info("Setup completed for a new test")
 end
 
@@ -270,6 +289,27 @@ function TestBetterTurtleMove:testMoveInvalidDirection()
     turtle.reset()
 
     lu.assertErrorMsgContains("Invalid direction", self.betterTurtle.move, self.betterTurtle, "north")
+end
+
+function TestBetterTurtle:testFindMaxLevelWithFuelInSlot16()
+    self.betterTurtle.getItemCount = function(slot) if slot == 16 then return 5 else return 0 end end
+    self.betterTurtle.getFuelLevel = function() return 100 end
+    local maxFuel = self.betterTurtle:findMaxLevel()
+    lu.assertEquals(maxFuel, 600)
+end
+
+function TestBetterTurtle:testFindMaxLevelWithNoFuelInSlot16()
+    self.betterTurtle.getItemCount = function(slot) if slot == 16 then return 0 else return 0 end end
+    self.betterTurtle.getFuelLevel = function() return 100 end
+    local maxFuel = self.betterTurtle:findMaxLevel()
+    lu.assertEquals(maxFuel, 100)
+end
+
+function TestBetterTurtle:testFindMaxLevelWithNoLavaInSlot15()
+    self.betterTurtle.getItemCount = function(slot) if slot == 15 then return 0 else return 0 end end
+    self.betterTurtle.getFuelLevel = function() return 100 end
+    local maxFuel = self.betterTurtle:findMaxLevel()
+    lu.assertEquals(maxFuel, 100)
 end
 
 os.exit(lu.LuaUnit.run())

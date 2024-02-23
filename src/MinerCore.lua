@@ -14,13 +14,24 @@ require('environment')
 local environment = Environment:new()
 require('mutex')
 
-function table:contains(value)
-    for k, v in pairs(self) do
-        if v == value then
-            return true
+function loadConfig()
+    local file = io.open("config.ini", "r")
+    local config = {}
+
+    for line in file:lines() do
+        local key, value = string.match(line, "(%w+)%s-=%s-(%w+)")
+        if key and value then
+            config[key] = value
         end
     end
-    return false
+
+    file:close()
+    return config
+end
+
+local config = loadConfig()
+for key, value in pairs(config) do
+    print(key, value)
 end
 
 function dumpWaste()
@@ -99,8 +110,8 @@ function mineVein(direction, blockType, nLevel) -- Vein mine function
 end
 
 local function suckInventory(direction)
-    if betterTurtle.actionInDirection("detect", direction) and betterTurtle.actionInDirection("inspect", direction) then
-        while betterTurtle.actionInDirection("suck", direction) do end
+    if betterTurtle:actionInDirection("detect", direction) and betterTurtle:actionInDirection("inspect", direction) then
+        while betterTurtle:actionInDirection("suck", direction) do end
     end
 end
 
@@ -122,4 +133,171 @@ function check(nLevel) -- Recursive checker for valuables
         end
     end
     betterTurtle:move(directions.getInverseDirection(lastDirection), true)
+    betterTurtle:turn(lastDirection)
+end
+
+function branch(mainPos)
+    local gone = 0
+    for i = 1, 25 do
+        betterTurtle.move("forward", true, true)
+        print( "[branch]: Dug branch at pos ["..mainPos.."] ["..gone.."]!" )
+        gone = gone + 1
+        if not ok then break end
+        check()
+        if not ok then break end
+    end
+    print( "[branch]: Returning to main!" )
+    for i = 1, gone do
+        betterTurtle.move("back", true, true)
+    end
+    print( "[branch]: Returned to main!" )
+end
+
+local function moveUntilWallOrMaxRange(gone, maxRange)
+    print("[main]: Searching wall")
+    repeat
+        if betterTurtle:move("forward", true, true) then
+            gone = gone + 1
+            if gone >= maxRange then
+                print("[main]: Exceeding 64 blocks range, returning")
+                ok = false
+                rangeReached = true
+                break
+            end
+        end
+    until betterTurtle.detect()
+    print("[main]: Found wall")
+    return gone
+end
+
+local function digMainTunnel(gone, maxRange)
+    print("Digging main at pos ["..gone.."]")
+    for i = 1, 3 do
+        betterTurtle.move("forward", true, true)
+        print( "[main]: Digging main at pos ["..gone.."]!" )
+        if gone >= maxRange then
+            print("[main]: Exceeding 64 blocks range, returning")
+            ok = false
+            rangeReached = true
+            break
+        end
+        gone = gone + 1
+        check()
+    end
+    return gone
+end
+
+function main()
+    local gone = 0
+    while not stop do
+        local originalDirection = betterTurtle.direction
+        if rangeReached then
+            print("[main]: Range reached, turning right")
+            betterTurtle.relativeTurn("right")
+            originalDirection = betterTurtle.direction
+            ok = true
+            rangeReached = false
+        end
+        gone = moveUntilWallOrMaxRange(gone, maxRange)
+        while ok do
+            gone = digMainTunnel(gone, maxRange)
+            if not ok then break end
+            betterTurtle.relativeTurn("right")
+            print( "[main]: Initiating branch in right wing!" )
+            branch(gone-1)
+            if not ok then break end
+            betterTurtle.relativeTurn("back")
+            print( "[main]: Initiating branch in left wing!" )
+            branch(gone-1)
+            if not ok then break end
+            betterTurtle.relativeTurn("right")
+        end
+        --not ok, return to base
+        print( "[main]: Returning to base!" )
+        print ("[main]: At relative position: ".. tostring(betterTurtle.position))
+        betterTurtle:moveToPosition({0, 0, 0}, true)
+        print ("[main]: At relative position: ".. tostring(betterTurtle.position))
+        print( "[main]: Returned to base!" )
+        betterTurtle:turn(originalDirection)
+        for i = 1, 14 do
+            betterTurtle.select( i )
+            betterTurtle.dropDown()
+        end
+        betterTurtle.select( 1 )
+        if not inventoryFull and not rangeReached then
+            stop = true
+            print( "[main]: Inventory was not full, something else went wrong" )
+        elseif inventoryFull then
+            ok = true
+            inventoryFull = false
+            print( "[main]: Inventory was full, continuing operation" )
+        end
+    end
+end
+
+function isOk()
+    local okLevel = findMaxLevel() / 2 + 10
+    while ok do
+        local currentLevel = betterTurtle.getFuelLevel()
+        if currentLevel < 100 then --check fuel
+            print( "[isOk]: Fuel Level Low!" )
+            if betterTurtle.getItemCount( 16 ) > 0 then
+                print( "[isOk]: Refueling!" )
+                repeat
+                    betterTurtle.select( 16 )
+                until betterTurtle.refuel( 1 ) or betterTurtle.getSelectedSlot() == 16
+                if betterTurtle.getFuelLevel() > currentLevel then
+                    print( "[isOk]: Refuel Successful!" )
+                else
+                    print( "[isOk]: Refuel Unsuccessful, Initiating return!" )
+                    ok = false
+                end
+            end
+        elseif okLevel - ignoredFuel > findMaxLevel()  then
+            print("[isOk]: Fuel Reserves Depleted!  Initiating return!")
+            ok = false
+        end
+        --make sure betterTurtle can take new items
+        local hasSpace = false
+        for i = 14, 1, -1 do
+            if betterTurtle.getItemCount( i ) == 0 then
+                hasSpace = true
+                break
+            end
+        end
+        local manualInterrupt = false
+        --Listen for RedNet manual interrupts
+        if rednet.isOpen("left") then
+            --Listen for RET
+            local _, msg = rednet.receive(nil, 0.1)
+            if msg == "RET" then
+                manualInterrupt = true
+            end
+        end
+        if not hasSpace then
+            print( "[isOk]: Out of space!  Intiating return!" )
+            ok = false
+            inventoryFull = true
+        end
+        if manualInterrupt then
+            print("[isOk]: Manual return requested!, Returning..")
+            ok = false
+        end
+        if ok then
+            print( "[isOk]: Everything is OK!" )
+            local id = os.startTimer( 10 )
+            while true do
+                local _, tid = os.pullEvent( "timer" )
+                if tid == id then
+                    break
+                end
+            end
+        end
+    end
+end
+
+parallel.waitForAll( trackTime, isOk, dumpWaste, main )
+for i = 1, 14 do
+    betterTurtle.select( i )
+    betterTurtle.dropDown()
 end

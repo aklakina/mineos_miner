@@ -238,3 +238,29 @@ function BetterTurtle:moveToPosition(position, force, order)
     end
     return true
 end
+
+function BetterTurtle:findMaxLevel()
+    local level = self.getFuelLevel()
+    local maxFuel = 0
+    if self.getItemCount( 16 ) > 1 then
+        if not fuelAmount then
+            self.select( 16 )
+            self.refuel( 1 )
+            fuelAmount = self.getFuelLevel() - level
+            print( "[findMaxLevel]: Found fuelAmount: "..fuelAmount)
+        end
+        print( "[findMaxLevel]: Found max level: " .. self.getItemCount( 16 ) * fuelAmount + self.getFuelLevel() .. "!")
+        maxFuel = self.getItemCount( 16 ) * fuelAmount + self.getFuelLevel()
+    else
+        print( "[findMaxLevel]: Found max level: " .. self.getFuelLevel() .. "!" )
+        maxFuel = self.getFuelLevel()
+    end
+    if self.getItemCount( 15 ) > 0 then
+        self.select( 15 )
+        if self.refuel() then
+            print( "[findMaxLevel]: Found lava, refueled by 1000!" )
+            maxFuel = maxFuel + 1000
+        end
+    end
+    return maxFuel
+end
