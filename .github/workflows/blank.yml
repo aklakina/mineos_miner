@@ -47,5 +47,4 @@ jobs:
         run: ./build.sh
 
       - name: Run lua unit tests
-        run: lua $GITHUB_WORKSPACE/build/unitTests.lua
-        
+        run: cd ./build && lua unitTests.lua
