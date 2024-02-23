@@ -39,7 +39,7 @@ jobs:
       - name: Install LuaRocks (latest)
         uses: jkl1337/gh-actions-luarocks@v5
         with:
-          withLuaPath: /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin
+          withLuaPath: /home/runner/.local/share/luver/lua-versions/5.4.6/installation
     
       - name: Install luaunit
         run: luarocks install luaunit
