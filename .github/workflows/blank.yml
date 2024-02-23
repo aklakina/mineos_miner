@@ -25,6 +25,9 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
 
+      - name: add permissions
+        run: chmod u+rwx -r *
+
       - name: Create the build directory with the test sources
         run: ./build.sh
 
