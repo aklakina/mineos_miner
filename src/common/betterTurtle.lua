@@ -5,15 +5,9 @@
 ---
 
 require('Logger')
-local logger = Logger:new(Logger.levels.INFO, "BetterTurtle")
+local logger = Logger:new(Logger.levels.DEBUG, "BetterTurtle")
 require('mutex')
-
-local numToDirection = {
-    [0] = "forward",
-    [1] = "right",
-    [2] = "back",
-    [3] = "left",
-}
+require('coordinate') -- Import the coordinate module
 
 function isDirectionValid(direction)
     for k, v in pairs(directions) do
@@ -25,51 +19,32 @@ function isDirectionValid(direction)
 end
 
 function getMethodNameForDirection(method, direction)
+    if getmetatable(direction) ~= Direction then
+        direction = directions.getDirectionFromName(direction)
+    end
     if method ~= "" then
-        if direction == "up" or direction == "down" then
-            return method .. string.upper(string.sub(direction, 1, 1)) .. string.sub(direction, 2)
+        if direction == directions.up or direction == directions.down then
+            return method .. string.upper(string.sub(direction.name, 1, 1)) .. string.sub(direction.name, 2)
         else
             return method
         end
     else
-        return direction
-    end
-end
-
-function getMovementVector(direction)
-    isDirectionValid(direction)
-    return directions[direction][2]
-end
-
-function getYNormalizedDirection(direction)
-    if direction == "up" or direction == "down" then
-        return direction
-    else
-        return "forward"
-    end
-end
-
-function getInverseDirection(direction)
-    isDirectionValid(direction)
-    if direction == "up" then
-        return "down"
-    elseif direction == "down" then
-        return "up"
-    else
-        return numToDirection[(directions[direction][1] + 2) % 4]
+        return direction.name
     end
 end
 
 BetterTurtle = {
-    position = {0, 0, 0},
-    direction = "forward"
+    position = Coordinate:new(0, 0, 0, directions.forward), -- Use Coordinate for position
+    direction = directions.forward
 }
 
 function BetterTurtle:turn(direction)
-    logger:debug("Turning to " .. direction)
-    logger:trace(self.direction .. " --> " .. direction)
-    isDirectionValid(direction)
-    local diff = (directions[direction][1] - directions[self.direction][1]) % 4
+    if getmetatable(direction) ~= Direction then
+        direction = directions.getDirectionFromName(direction)
+    end
+    logger:debug("Turning to " .. direction.name)
+    logger:trace(self.direction.name .. " --> " .. direction.name)
+    local diff = (direction.num - self.direction.num) % 4
     logger:trace("Difference: " .. diff)
     if diff == 1 then
         turtle.turnRight()
@@ -80,20 +55,19 @@ function BetterTurtle:turn(direction)
         turtle.turnLeft()
     end
     self.direction = direction
-    logger:debug("New direction: " .. self.direction)
+    logger:debug("New direction: " .. self.direction.name)
     return diff
 end
 
 function BetterTurtle:relativeToGlobalDirection(direction)
-    isDirectionValid(direction)
-    if direction == "up" or direction == "down" then
-        return direction
+    local globalOffset = self.direction.num
+    local relativeOffset = direction.num
+    logger:trace("Turtle's current direction: " .. self.direction.name)
+    logger:trace("Relative direction: " .. direction.name)
+    if direction.num == 0 then
+        return self.direction
     end
-    local globalOffset = directions[self.direction][1]
-    local relativeOffset = directions[direction][1]
-    logger:trace("Turtle's current direction: " .. self.direction)
-    logger:trace("Relative direction: " .. direction)
-    return numToDirection[(relativeOffset + globalOffset) % 4]
+    return directions.getDirectionFromNum((relativeOffset + globalOffset) % 4)
 end
 
 function BetterTurtle:relativeTurn(direction)
@@ -101,8 +75,11 @@ function BetterTurtle:relativeTurn(direction)
     Turns the turtle in a relative direction
     :param direction: The relative direction to turn the turtle to
     ]]--
-    logger:debug("Relative turn direction: " .. direction)
-    logger:trace("Turning from " .. self.direction .. " to " .. self:relativeToGlobalDirection(direction))
+    if getmetatable(direction) ~= Direction then
+        direction = directions.getDirectionFromName(direction)
+    end
+    logger:debug("Relative turn direction: " .. direction.name)
+    logger:trace("Turning from " .. self.direction.name .. " to " .. self:relativeToGlobalDirection(direction).name)
     return self:turn(self:relativeToGlobalDirection(direction))
 end
 
@@ -119,7 +96,9 @@ function BetterTurtle:new(o)
 end
 
 function BetterTurtle:actionInDirection(action, direction)
-    isDirectionValid(direction)
+    if getmetatable(direction) ~= Direction then
+        direction = directions.getDirectionFromName(direction)
+    end
     local methodName = getMethodNameForDirection(action, direction)
     logger:debug("Calling turtle method: " .. methodName)
     return turtle[methodName]()
@@ -173,9 +152,9 @@ function BetterTurtle:forceDig(direction, relative)
 end
 
 function BetterTurtle:offsetPosition(direction)
-    local movementVector = getMovementVector(direction)
-    return {self.position[1] + movementVector[1], self.position[2] + movementVector[2], self.position[3] + movementVector[3]}
+    return self.position + direction.vector
 end
+
 
 function BetterTurtle:suckLava(direction, nLevel)
     local success, data = betterTurtle.actionInDirection("inspect", direction)
@@ -212,22 +191,12 @@ Moves the turtle in a direction
 :param relative: Whether the direction is relative to the turtle's current direction, defaults to false
 --]]
 function BetterTurtle:move(direction, force, relative)
-    logger:debug("Starting move function with direction: " .. tostring(direction) .. ", force: " .. tostring(force) .. ", and relative: " .. tostring(relative))
+    if getmetatable(direction) ~= Direction then
+        direction = directions.getDirectionFromName(direction)
+    end
+    logger:debug("Starting move function with direction: " .. tostring(direction.name) .. ", force: " .. tostring(force) .. ", and relative: " .. tostring(relative))
 
-    if direction == nil then
-        direction = self.direction
-        logger:trace("Direction was nil, setting it to self.direction: " .. direction)
-    end
-    if relative == nil then
-        relative = false
-        logger:trace("Relative was nil, setting it to false")
-    end
-    if force == nil then
-        force = false
-        logger:trace("Force was nil, setting it to false")
-    end
-
-    local moveMethodName = getMethodNameForDirection("", getYNormalizedDirection(direction))
+    local moveMethodName = getMethodNameForDirection("", directions.convertToForward(direction))
     local movementVector = {}
     local globDirection = {}
     local relativeDirection = {}
@@ -240,9 +209,9 @@ function BetterTurtle:move(direction, force, relative)
         relativeDirection = self:relativeToGlobalDirection(direction)
     end
 
-    movementVector = getMovementVector(globDirection)
+    movementVector = globDirection.vector
 
-    if relativeDirection == "back" then
+    if relativeDirection == directions.back then
         movementVector = movementVector * -1
         moveMethodName = "back"
     end
@@ -250,19 +219,19 @@ function BetterTurtle:move(direction, force, relative)
     if moveMethodName ~= "back" then
         local rot = self:turn(globDirection)
         if rot > 0 then
-            moveMethodName = getMethodNameForDirection("", "forward")
+            moveMethodName = getMethodNameForDirection("", directions.forward)
         end
     end
     if self:actionInDirection("", moveMethodName) then
-        self.position:add(movementVector)
-        logger:info("Move successful, new position: ".. self.position.tostring())
+        self.position = self.position + movementVector
+        logger:debug("Move successful, new position: ".. tostring(self.position))
         return true
     elseif force then
-        logger:trace("Force is true, calling forceDig with direction: " .. globDirection .. " and relative: " .. tostring(relative))
+        logger:trace("Force is true, calling forceDig with direction: " .. globDirection.name .. " and relative: " .. tostring(relative))
         self:forceDig(globDirection)
-        movementVector = directions.getMovementVector(self.direction)
+        movementVector = self.direction.vector
         self.position = self.position + movementVector
-        logger:warn("Move was forced, new position: ".. self.position.tostring())
+        logger:warn("Move was forced, new position: ".. tostring(self.position))
         return self:actionInDirection("", moveMethodName)
     else
         logger:error("Move failed")
@@ -277,15 +246,19 @@ Moves the turtle to a position
 --]]
 function BetterTurtle:moveToPosition(position, force, order)
     local _order = order or {"y", "z", "x"}
+    if getmetatable(position) ~= Coordinate then
+        position = Coordinate.parse(position)
+    end
     local distance = Distance:new(self.position, position)
     for _, axis in ipairs(_order) do
-        if distance[axis][2] ~= 0 then
-            local direction = distance[axis][1]
-            local pos = axisToIndex[axis]
-            logger:info("Moving in direction " .. direction .. " " .. distance[axis][2] .. " times")
+        if distance[axis].distance ~= 0 then
+            local direction = distance[axis].direction
+            logger:info("Moving in direction " .. direction.name .. " " .. distance[axis].distance .. " times")
             self:turn(direction)
             local relDirection = directions.convertToForward(direction)
-            while self.position[pos] ~= position[pos] do
+            while self.position[axis] ~= position[axis] do
+                logger:debug("Target position: " .. tostring(position))
+                logger:debug("Current position: " .. tostring(self.position))
                 if not self:move(relDirection, force, true) then
                     return false
                 end

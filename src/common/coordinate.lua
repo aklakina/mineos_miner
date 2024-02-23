@@ -36,7 +36,25 @@ directions = {
     any = Direction:new("any", 0, {0, 0, 0}),
 }
 
+numToDirections = {
+    [0] = directions.forward,
+    [1] = directions.right,
+    [2] = directions.back,
+    [3] = directions.left
+}
+
+function directions.getDirectionFromNum(num)
+    return numToDirections[num] or error("Invalid direction number")
+end
+
+function directions.getDirectionFromName(name)
+    return directions[name] or error("Invalid direction name")
+end
+
 function directions.convertToForward(direction)
+    if getmetatable(direction) ~= Direction then
+        direction = directions[direction]
+    end
     if direction == directions.up or direction == directions.down then
         return direction
     else
@@ -64,13 +82,18 @@ Coordinate = {
     direction = directions.forward,
 }
 
-function Coordinate.parseInto(o, t)
+function Coordinate.parse(o)
     if type(o) == "table" then
         if o.x and o.y and o.z then
-            t = Coordinate:new(o.x, o.y, o.z, o.direction or directions.any)
+            return Coordinate:new(o.x, o.y, o.z, o.direction or directions.any)
+        elseif type(o[1]) == "number" and type(o[2]) == "number" and type(o[3]) == "number" then
+            return Coordinate:new(o[1], o[2], o[3], o[4] or directions.any)
+        else
+            error("Invalid arguments for Coordinate.parse")
         end
+    else
+        error("Invalid arguments for Coordinate.parse")
     end
-    error("Invalid arguments for Coordinate.parse")
 end
 
 function Coordinate:new(x, y, z, direction)
@@ -95,20 +118,20 @@ directions.any.vector = Coordinate:new(0, 0, 0, directions.any)
 
 function Coordinate.__add(o, t)
     if not (getmetatable(t) == Coordinate) then
-        Coordinate.parseInto(t, t)
+        t = Coordinate.parse(t)
     end
     if not (getmetatable(o) == Coordinate) then
-        Coordinate.parseInto(o, o)
+        o = Coordinate.parse(o)
     end
     return Coordinate:new(o.x + t.x, o.y + t.y, o.z + t.z, o.direction or directions.any)
 end
 
 function Coordinate.__mul(o, t)
     if not (getmetatable(t) == Coordinate or type(t) == "number") then
-        Coordinate.parseInto(t, t)
+        t = Coordinate.parse(t)
     end
     if not (getmetatable(o) == Coordinate) then
-        Coordinate.parseInto(o, o)
+        o = Coordinate.parse(o)
     end
     if type(t) == "number" then
         return Coordinate:new(o.x * t, o.y * t, o.z * t, o.direction or directions.any)
@@ -120,24 +143,35 @@ function Coordinate:__tostring()
     return "["..self.x..", "..self.y..", "..self.z.."]"
 end
 
+function Coordinate:__eq(o, t)
+    if not (getmetatable(t) == Coordinate) then
+        t = Coordinate.parse(t)
+    end
+    if not (getmetatable(o) == Coordinate) then
+        o = Coordinate.parse(o)
+    end
+    return o.x == t.x and o.y == t.y and o.z == t.z
+end
+
 Distance = {
-    x = {directions.right, 0},
-    y = {directions.up, 0},
-    z = {directions.forward, 0},
+    x = {direction = directions.right, distance = 0},
+    y = {direction = directions.up, distance = 0},
+    z = {direction = directions.forward, distance = 0},
+    distance = Coordinate:new(0, 0, 0, directions.any)
 }
 
-function Distance:new(o, t)
-    -- Check if both origo and target are of type Coordinate
-    if not (getmetatable(o) == Coordinate and getmetatable(t) == Coordinate) then
-        -- Try to parse them as Coordinate
-        if not (pcall(function() o = Coordinate:new(o.x, o.y, o.z, o.direction or directions.any) end) and pcall(function() t = Coordinate:new(t.x, t.y, t.z, t.direction  or directions.any) end)) then
-            error("Invalid arguments for Distance constructor")
-        end
+function Distance:new(t, o)
+    if not (getmetatable(t) == Coordinate) then
+        t = Coordinate.parse(t)
+    end
+    if not (getmetatable(o) == Coordinate) then
+        o = Coordinate.parseInto(o)
     end
     local _ret = {
-        x = {o.x - t.x < 0 and "left" or "right", o.x - t.x},
-        y = {o.y - t.y < 0 and "down" or "up", o.y - t.y},
-        z = {o.z - t.z < 0 and "back" or "forward", o.z - t.z},
+        x = {direction = o.x - t.x < 0 and directions.left or directions.right, distance = o.x - t.x},
+        y = {direction = o.y - t.y < 0 and directions.down or directions.up, distance = o.y - t.y},
+        z = {direction = o.z - t.z < 0 and directions.back or directions.forward, distance = o.z - t.z},
+        distance = Coordinate:new(o.x - t.x, o.y - t.y, o.z - t.z, directions.any)
     }
     setmetatable(_ret, self)
     self.__index = self
@@ -145,8 +179,5 @@ function Distance:new(o, t)
 end
 
 function Distance:getAbsolute()
-    local dx = self.x[2]
-    local dy = self.y[2]
-    local dz = self.z[2]
-    return math.sqrt(dx * dx + dy * dy + dz * dz)
+    return math.sqrt(self.distance * self.distance)
 end

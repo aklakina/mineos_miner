@@ -51,7 +51,7 @@ end
 
 function TestDirection:testGetInverseMovementVector()
     local inverse = directions.getInverseMovementVector("right")
-    lu.assertEquals(inverse, {-1, 0, 0})
+    lu.assertEquals(tostring(inverse), "[-1, -0, -0]")
 end
 
 TestDistance = {}
@@ -59,10 +59,10 @@ TestDistance = {}
 function TestDistance:testNewDistance()
     local coordinate1 = Coordinate:new(1, 2, 3, directions.forward)
     local coordinate2 = Coordinate:new(4, 5, 6, directions.right)
-    local distance = Distance:new(coordinate1, coordinate2)
-    lu.assertEquals(distance.x[2], -3)
-    lu.assertEquals(distance.y[2], -3)
-    lu.assertEquals(distance.z[2], -3)
+    local distance = Distance:new(coordinate2, coordinate1)
+    lu.assertEquals(distance.x.distance, -3)
+    lu.assertEquals(distance.y.distance, -3)
+    lu.assertEquals(distance.z.distance, -3)
 end
 
 function TestDistance:testGetDistance()
@@ -100,25 +100,14 @@ function TestBetterTurtleUtils:testGetMethodNameForDirection()
     logger:info("Finished test: testGetMethodNameForDirection")
 end
 
-function TestBetterTurtleUtils:testGetMovementVector()
-    logger:info("Starting test: testGetMovementVector")
-    lu.assertEquals(getMovementVector("forward"), {0, 0, 1})
-    lu.assertEquals(getMovementVector("right"), {1, 0, 0})
-    lu.assertEquals(getMovementVector("back"), {0, 0, -1})
-    lu.assertEquals(getMovementVector("left"), {-1, 0, 0})
-    lu.assertEquals(getMovementVector("up"), {0, 1, 0})
-    lu.assertEquals(getMovementVector("down"), {0, -1, 0})
-    logger:info("Finished test: testGetMovementVector")
-end
-
 function TestBetterTurtleUtils:testGetRelativeDirection()
     logger:info("Starting test: testGetRelativeDirection")
-    lu.assertEquals(getYNormalizedDirection("forward"), "forward")
-    lu.assertEquals(getYNormalizedDirection("right"), "forward")
-    lu.assertEquals(getYNormalizedDirection("back"), "forward")
-    lu.assertEquals(getYNormalizedDirection("left"), "forward")
-    lu.assertEquals(getYNormalizedDirection("up"), "up")
-    lu.assertEquals(getYNormalizedDirection("down"), "down")
+    lu.assertEquals(directions.convertToForward("forward"), directions.forward)
+    lu.assertEquals(directions.convertToForward("right"), directions.forward)
+    lu.assertEquals(directions.convertToForward("back"), directions.forward)
+    lu.assertEquals(directions.convertToForward("left"), directions.forward)
+    lu.assertEquals(directions.convertToForward("up"), directions.up)
+    lu.assertEquals(directions.convertToForward("down"), directions.down)
     logger:info("Finished test: testGetRelativeDirection")
 end
 
@@ -133,15 +122,15 @@ end
 
 function TestBetterTurtle:testTurtleActions()
     self.betterTurtle:turn("right")
-    lu.assertEquals(self.betterTurtle.direction, "right")
+    lu.assertEquals(self.betterTurtle.direction, directions.right)
     turtle.reset()
 
     lu.assertErrorMsgContains("Invalid direction", self.betterTurtle.turn, self.betterTurtle, "north")
     turtle.reset()
 
     self.betterTurtle:relativeTurn("right")
-    lu.assertEquals(self.betterTurtle.direction, "back")
-    lu.assertEquals(self.betterTurtle.position, {0, 0, 0})
+    lu.assertEquals(self.betterTurtle.direction, directions.back)
+    lu.assertEquals(tostring(self.betterTurtle.position), "[0, 0, 0]")
     lu.assertEquals(minecraftAPI_callHistory, {"turtle.turnRight"})
     turtle.reset()
 
@@ -156,17 +145,17 @@ function TestBetterTurtle:testTurtleActions()
     turtle.reset()
 
     self.betterTurtle:move("forward")
-    lu.assertEquals(self.betterTurtle.position, {0, 0, 1})
+    lu.assertEquals(tostring(self.betterTurtle.position), "[0, 0, 1]")
     turtle.reset()
 
     self.betterTurtle:moveToPosition({1, 1, 1})
-    lu.assertEquals(self.betterTurtle.position, {1, 1, 1})
+    lu.assertEquals(tostring(self.betterTurtle.position), "[1, 1, 1]")
     turtle.reset()
 
     turtle.blocked = true
     self.betterTurtle:moveToPosition({1, 1, 1})
     lu.assertEquals(minecraftAPI_callHistory, {})
-    lu.assertEquals(self.betterTurtle.position, {1, 1, 1})
+    lu.assertEquals(tostring(self.betterTurtle.position), "[1, 1, 1]")
 end
 
 TestBetterTurtleMove = {}
