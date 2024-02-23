@@ -7,11 +7,21 @@
 require('Logger')
 local logger = Logger:new(Logger.levels.INFO, "MinerCore")
 
+require('coordinate')
 require('betterTurtle')
 local betterTurtle = BetterTurtle:new()
 require('environment')
 local environment = Environment:new()
 require('mutex')
+
+function table:contains(value)
+    for k, v in pairs(self) do
+        if v == value then
+            return true
+        end
+    end
+    return false
+end
 
 function dumpWaste()
     local num_dumped = 0
@@ -19,7 +29,7 @@ function dumpWaste()
     for i = 1, 14 do
         local count = betterTurtle.getItemCount( i )
         local detail = betterTurtle.getItemDetail( i )
-        if detail ~= nil and has_value(waste_blocks, detail.name) then
+        if detail ~= nil and environment:checkBlockType(detail) == blockType.WASTE then
             betterTurtle.select( i )
             betterTurtle.drop( count )
             num_dumped = num_dumped + count
@@ -49,4 +59,67 @@ function dumperLoop()
             end
         end
     end
+end
+
+function suckLava(direction, blockType, blockPos, nLevel)
+    if blockType == blockType.FUEL then
+        if betterTurtle.getFuelLevel() > 90000 then
+            environment:storeFuelLocation(blockPos)
+            return false
+        end
+        Mutex:lock("suckLava")
+        betterTurtle.select( 15 )
+        if betterTurtle:actionInDirection("place", direction) then
+            print( "[check]: Lava detected!" )
+            if betterTurtle.refuel() then
+                print( "[check]: Refueled using lava source!" )
+                local lastDirection = betterTurtle.direction
+                betterTurtle:move(direction, true)
+                betterTurtle.select( 1 )
+                Mutex:unlock("suckLava")
+                check( nLevel + 1 )
+                betterTurtle:move(directions.getInverseDirection(lastDirection), true)
+            else
+                print( "[check]: Liquid was not lava!" )
+                betterTurtle.place()
+                betterTurtle.select( 1 )
+                Mutex:unlock("suckLava")
+            end
+        end
+    end
+end
+
+function mineVein(direction, blockType, nLevel) -- Vein mine function
+    local lastDirection = betterTurtle.direction
+    if blockType == blockType.OTHER then
+        betterTurtle:move(direction, true)
+        check( nLevel + 1 )
+        betterTurtle:move(directions.getInverseDirection(lastDirection), true)
+    end
+end
+
+local function suckInventory(direction)
+    if betterTurtle.actionInDirection("detect", direction) and betterTurtle.actionInDirection("inspect", direction) then
+        while betterTurtle.actionInDirection("suck", direction) do end
+    end
+end
+
+function check(nLevel) -- Recursive checker for valuables
+    if nLevel > 100 then
+        return
+    end
+    local lastDirection = betterTurtle.direction
+    for k, v in pairs(directions) do
+        local blockExists, blockData = betterTurtle:actionInDirection("inspect", v)
+        local blockType = environment:checkBlock(blockData)
+        if blockExists then
+            local blockPos = betterTurtle:offsetPosition(v)
+            if not environment:isBlockChecked(blockPos) then
+                suckLava(v, blockType, blockPos, nLevel)
+                mineVein(v, blockType, blockPos, nLevel)
+                suckInventory(v)
+            end
+        end
+    end
+    betterTurtle:move(directions.getInverseDirection(lastDirection), true)
 end

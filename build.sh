@@ -16,3 +16,5 @@ do
         cp "$file" ./build
     fi
 done
+# copy everything from src/resources too
+cp -r ./src/resources/* ./build

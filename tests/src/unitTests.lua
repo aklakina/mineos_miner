@@ -72,6 +72,58 @@ function TestDistance:testGetDistance()
     lu.assertEquals(distance:getAbsolute(), math.sqrt(27))
 end
 
+require('environment')
+
+TestEnvironment = {}
+
+function TestEnvironment:testIsBlockCheckedWithCheckedBlock()
+    local environment = Environment:new()
+    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
+    environment:insertCoordToCheckedBlocks(coordinate)
+    lu.assertTrue(environment:isBlockChecked(coordinate))
+end
+
+function TestEnvironment:testIsBlockCheckedWithUncheckedBlock()
+    local environment = Environment:new()
+    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
+    lu.assertFalse(environment:isBlockChecked(coordinate))
+end
+
+function TestEnvironment:testCheckBlockTypeWithWasteBlock()
+    local environment = Environment:new()
+    lu.assertEquals(environment:checkBlockType("waste"), blockType.WASTE)
+end
+
+function TestEnvironment:testCheckBlockTypeWithFuelBlock()
+    local environment = Environment:new()
+    lu.assertEquals(environment:checkBlockType("fuel"), blockType.FUEL)
+end
+
+function TestEnvironment:testCheckBlockTypeWithOtherBlock()
+    local environment = Environment:new()
+    lu.assertEquals(environment:checkBlockType("other"), blockType.OTHER)
+end
+
+function TestEnvironment:testCheckBlockWithCheckedBlock()
+    local environment = Environment:new()
+    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
+    environment:insertCoordToCheckedBlocks(coordinate)
+    lu.assertEquals(environment:checkBlock(coordinate, "waste"), blockType.WASTE)
+end
+
+function TestEnvironment:testCheckBlockWithUncheckedBlock()
+    local environment = Environment:new()
+    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
+    lu.assertEquals(environment:checkBlock(coordinate, "fuel"), blockType.FUEL)
+end
+
+function TestEnvironment:testStoreFuelLocation()
+    local environment = Environment:new()
+    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
+    environment:storeFuelLocation(coordinate)
+    lu.assertTrue(environment.fuelLocations[coordinate.y][coordinate.x][coordinate.z])
+end
+
 require('minecraftAPI') -- Assuming a mock turtle module is available
 
 -- Importing the BetterTurtle module

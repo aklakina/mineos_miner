@@ -155,35 +155,6 @@ function BetterTurtle:offsetPosition(direction)
     return self.position + direction.vector
 end
 
-
-function BetterTurtle:suckLava(direction, nLevel)
-    local success, data = betterTurtle.actionInDirection("inspect", direction)
-    if success and data.name == "minecraft:lava" then
-        if betterTurtle.getFuelLevel() > 90000 then
-            return false
-        end
-        Mutex:lock("suckLava")
-        betterTurtle.select( 15 )
-        if betterTurtle.actionInDirection("place", direction) then
-            print( "[check]: Lava detected!" )
-            if betterTurtle.refuel() then
-                print( "[check]: Refueled using lava source!" )
-                local lastDirection = betterTurtle.direction
-                betterTurtle.move(direction, true)
-                betterTurtle.select( 1 )
-                Mutex:unlock("suckLava")
-                check( nLevel + 1 )
-                betterTurtle.move(getInverseDirection(lastDirection), true)
-            else
-                print( "[check]: Liquid was not lava!" )
-                betterTurtle.place()
-                betterTurtle.select( 1 )
-                Mutex:unlock("suckLava")
-            end
-        end
-    end
-end
-
 --[[
 Moves the turtle in a direction
 :param direction: The direction to move in

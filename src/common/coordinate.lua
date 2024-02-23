@@ -47,6 +47,13 @@ function directions.getDirectionFromNum(num)
     return numToDirections[num] or error("Invalid direction number")
 end
 
+function directions.getInverseDirection(direction)
+    if getmetatable(direction) ~= Direction then
+        direction = directions[direction]
+    end
+    return direction == directions.up and directions.down or direction == directions.down and directions.up or directions.getDirectionFromNum((direction.num + 2) % 4)
+end
+
 function directions.getDirectionFromName(name)
     return directions[name] or error("Invalid direction name")
 end
