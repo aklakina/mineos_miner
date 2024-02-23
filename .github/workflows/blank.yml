@@ -25,14 +25,14 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
       - uses: actions/checkout@v3
 
+      - name: add permissions
+        run: chmod u+rwx -R ./*
+
       - name: Install LuaRocks
         uses: leafo/gh-actions-luarocks@v4.3.0
 
       - name: Install luaunit
         run: luarocks install luaunit
-
-      - name: add permissions
-        run: chmod u+rwx -R ./*
 
       - name: Create the build directory with the test sources
         run: ./build.sh
