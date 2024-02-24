@@ -203,7 +203,7 @@ end
 function TestBinaryHeap:testDecreaseKeyWithNonExistingCoordinate()
     local coordinate = Coordinate:new(7, 8, 9)
     self.binaryHeap:decreaseKey(coordinate, 1)
-    lu.assertEquals(#self.binaryHeap.heap, 0)
+    lu.assertEquals(#self.binaryHeap.heap, 1)
 end
 
 function TestBinaryHeap:testDecreaseKeyWithExistingCoordinate()

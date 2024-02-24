@@ -280,20 +280,8 @@ function Environment:dijkstra(source, targets)
     local previous = {}
     local queue = BinaryHeap:new()
 
-    for y, row in pairs(self.checkedBlocks) do
-        for x, column in pairs(row) do
-            for z, blockType in pairs(column) do
-                local coordinate = Coordinate:new(x, y, z)
-                if source:isEqual(coordinate) then
-                    distance[tostring(coordinate)] = 0
-                    queue:insert(coordinate, 0)
-                else
-                    distance[tostring(coordinate)] = math.huge
-                    queue:insert(coordinate, math.huge + self:heuristic(coordinate, targets)) -- heuristic from the first target
-                end
-            end
-        end
-    end
+    distance[tostring(source)] = 0
+    queue:insert(source, 0)
 
     local targetReached = nil
     while not queue:isEmpty() do
@@ -309,14 +297,10 @@ function Environment:dijkstra(source, targets)
         end
         for direction, data in pairs(self:getNeighbours(current)) do
             local alt = distance[tostring(current)] + self:getCost(data.type)
-            if not distance[tostring(data.position)] then
-                distance[tostring(data.position)] = math.huge
-                queue:insert(data.position, math.huge + self:heuristic(data.position, targets)) -- heuristic from the first target
-            end
-            if alt < distance[tostring(data.position)] then
+            if alt < (distance[tostring(data.position)] and distance[tostring(data.position)] or math.huge) then
                 distance[tostring(data.position)] = alt
                 previous[tostring(data.position)] = current
-                queue:decreaseKey(data.position, alt)
+                queue:decreaseKey(data.position, alt + self:heuristic(data.position, targets))
             end
         end
     end

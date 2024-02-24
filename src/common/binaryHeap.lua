@@ -90,6 +90,7 @@ function BinaryHeap:decreaseKey(coordinate, newPriority)
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
+    local found = false
     for i, v in ipairs(self.heap) do
         if v.coordinate:isEqual(coordinate) then
             self.heap[i].priority = newPriority
@@ -97,7 +98,11 @@ function BinaryHeap:decreaseKey(coordinate, newPriority)
                 self.heap[i], self.heap[self:parent(i)] = self.heap[self:parent(i)], self.heap[i]
                 i = self:parent(i)
             end
+            found = true
             break
         end
+    end
+    if not found then
+        self:insert(coordinate, newPriority)
     end
 end
