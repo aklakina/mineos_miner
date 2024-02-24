@@ -51,7 +51,7 @@ jobs:
       - name: Get lua minifier
         uses: actions/checkout@v4.1.1
         with:
-          repository: stravant/LuaMinify
+          repository: Aklakina/LuaMinify
           path: LuaMinify
 
       - name: add permissions
