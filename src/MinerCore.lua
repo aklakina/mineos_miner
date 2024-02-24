@@ -14,6 +14,21 @@ require('environment')
 local environment = Environment:new()
 require('mutex')
 
+minerStates = {
+    MINING = {},
+    FUELING = {},
+    SEARCHING = {},
+    RETURNING = {}
+}
+
+minerState = minerStates.SEARCHING
+
+for i=-1, 1 do
+    for j=-1, 1 do
+        environment:insertCoordToCheckedBlocks(Coordinate:new(i, 0, j), blockType.BLOCKER)
+    end
+end
+
 function loadConfig()
     local file = io.open("config.ini", "r")
     local config = {}
@@ -72,10 +87,11 @@ function dumperLoop()
     end
 end
 
-function suckLava(direction, blockType, blockPos, nLevel)
-    if blockType == blockType.FUEL then
+function suckLava(direction, _blockType, blockPos)
+    if _blockType == blockType.FUEL then
         if betterTurtle.getFuelLevel() > 90000 then
             environment:storeFuelLocation(blockPos)
+            minerState = minerStates.SEARCHING
             return false
         end
         Mutex:lock("suckLava")
@@ -86,131 +102,72 @@ function suckLava(direction, blockType, blockPos, nLevel)
                 print( "[check]: Refueled using lava source!" )
                 local lastDirection = betterTurtle.direction
                 betterTurtle:move(direction, true)
+                environment:insertCoordToCheckedBlocks(betterTurtle.position, blockType.AIR)
                 betterTurtle.select( 1 )
                 Mutex:unlock("suckLava")
-                check( nLevel + 1 )
-                betterTurtle:move(directions.getInverseDirection(lastDirection), true)
+                minerState = minerStates.FUELING
+                return true
             else
                 print( "[check]: Liquid was not lava!" )
                 betterTurtle.place()
                 betterTurtle.select( 1 )
                 Mutex:unlock("suckLava")
+                minerState = minerStates.SEARCHING
+                return false
             end
         end
     end
 end
 
-function mineVein(direction, blockType, nLevel) -- Vein mine function
-    local lastDirection = betterTurtle.direction
-    if blockType == blockType.OTHER then
+function mineVein(direction, _blockType)
+    if _blockType == blockType.OTHER then
         betterTurtle:move(direction, true)
-        check( nLevel + 1 )
-        betterTurtle:move(directions.getInverseDirection(lastDirection), true)
+        environment:insertCoordToCheckedBlocks(betterTurtle.position, blockType.AIR)
+        minerState = minerStates.MINING
+        return true
+    else
+        minerState = minerStates.SEARCHING
+        return false
     end
 end
 
 local function suckInventory(direction)
     if betterTurtle:actionInDirection("detect", direction) and betterTurtle:actionInDirection("inspect", direction) then
         while betterTurtle:actionInDirection("suck", direction) do end
+        environment:insertCoordToCheckedBlocks(betterTurtle.offsetPosition(direction), blockType.BLOCKER)
+        minerState = minerStates.SEARCHING
+        return false
     end
 end
 
-function check(nLevel) -- Recursive checker for valuables
-    if nLevel > 100 then
-        return
-    end
-    local lastDirection = betterTurtle.direction
-    for k, v in pairs(directions) do
-        local blockExists, blockData = betterTurtle:actionInDirection("inspect", v)
-        local blockType = environment:checkBlock(blockData)
-        if blockExists then
-            local blockPos = betterTurtle:offsetPosition(v)
-            if not environment:isBlockChecked(blockPos) then
-                suckLava(v, blockType, blockPos, nLevel)
-                mineVein(v, blockType, blockPos, nLevel)
-                suckInventory(v)
+function check()
+    while true do
+        for k, v in pairs(directions) do
+            local blockExists, blockData = betterTurtle:actionInDirection("inspect", v)
+            local blockType = environment:checkBlock(blockData)
+            if blockExists then
+                local blockPos = betterTurtle:offsetPosition(v)
+                if not environment:isBlockChecked(blockPos) then
+                    if suckLava(v, blockType, blockPos, nLevel) then break end
+                    if mineVein(v, blockType, blockPos, nLevel) then break end
+                    if suckInventory(v) then break end
+                end
             end
         end
-    end
-    betterTurtle:move(directions.getInverseDirection(lastDirection), true)
-    betterTurtle:turn(lastDirection)
-end
-
-function branch(mainPos)
-    local gone = 0
-    for i = 1, 25 do
-        betterTurtle.move("forward", true, true)
-        print( "[branch]: Dug branch at pos ["..mainPos.."] ["..gone.."]!" )
-        gone = gone + 1
-        if not ok then break end
-        check()
-        if not ok then break end
-    end
-    print( "[branch]: Returning to main!" )
-    for i = 1, gone do
-        betterTurtle.move("back", true, true)
-    end
-    print( "[branch]: Returned to main!" )
-end
-
-local function moveUntilWallOrMaxRange(gone, maxRange)
-    print("[main]: Searching wall")
-    repeat
-        if betterTurtle:move("forward", true, true) then
-            gone = gone + 1
-            if gone >= maxRange then
-                print("[main]: Exceeding 64 blocks range, returning")
-                ok = false
-                rangeReached = true
-                break
-            end
-        end
-    until betterTurtle.detect()
-    print("[main]: Found wall")
-    return gone
-end
-
-local function digMainTunnel(gone, maxRange)
-    print("Digging main at pos ["..gone.."]")
-    for i = 1, 3 do
-        betterTurtle.move("forward", true, true)
-        print( "[main]: Digging main at pos ["..gone.."]!" )
-        if gone >= maxRange then
-            print("[main]: Exceeding 64 blocks range, returning")
-            ok = false
-            rangeReached = true
+        if minerState == minerStates.SEARCHING then
             break
         end
-        gone = gone + 1
-        check()
     end
-    return gone
+    local directions = environment:getClosestMiningPositions(betterTurtle.position)
+    for _, v in pairs(directions) do
+        betterTurtle:moveDistance(v)
+    end
 end
 
 function main()
-    local gone = 0
     while not stop do
-        local originalDirection = betterTurtle.direction
-        if rangeReached then
-            print("[main]: Range reached, turning right")
-            betterTurtle.relativeTurn("right")
-            originalDirection = betterTurtle.direction
-            ok = true
-            rangeReached = false
-        end
-        gone = moveUntilWallOrMaxRange(gone, maxRange)
         while ok do
-            gone = digMainTunnel(gone, maxRange)
-            if not ok then break end
-            betterTurtle.relativeTurn("right")
-            print( "[main]: Initiating branch in right wing!" )
-            branch(gone-1)
-            if not ok then break end
-            betterTurtle.relativeTurn("back")
-            print( "[main]: Initiating branch in left wing!" )
-            branch(gone-1)
-            if not ok then break end
-            betterTurtle.relativeTurn("right")
+
         end
         --not ok, return to base
         print( "[main]: Returning to base!" )

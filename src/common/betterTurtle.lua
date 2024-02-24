@@ -264,3 +264,23 @@ function BetterTurtle:findMaxLevel()
     end
     return maxFuel
 end
+
+function BetterTurtle:moveDistance(distance)
+    if getmetatable(distance) ~= Distance then
+        distance = Distance.parse(distance)
+    end
+    local _order = {"y", "z", "x"}
+    for _, axis in ipairs(_order) do
+        if distance[axis].distance ~= 0 then
+            local direction = distance[axis].direction
+            logger:info("Moving in direction " .. direction.name .. " " .. distance[axis].distance .. " times")
+            self:turn(direction)
+            local relDirection = directions.convertToForward(direction)
+            for i = 1, distance[axis].distance do
+                if not self:move(relDirection, false, true) then
+                    return false
+                end
+            end
+        end
+    end
+end

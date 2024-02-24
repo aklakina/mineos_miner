@@ -10,13 +10,16 @@ require('coordinate')
 
 local logger = Logger:new(Logger.levels.DEBUG, "Environment")
 
+require('binaryHeap')
+
 blockType = {
     WASTE = {},
     FUEL = {},
     OTHER = {},
     BLOCKER = {},
     AIR = {},
-    UNKNOWN = {}
+    UNKNOWN = {},
+    PATH = {}
 }
 
 Environment = {
@@ -24,16 +27,21 @@ Environment = {
     wasteBlocks = {},
     blockers = {},
     fuels = {},
-    fuelLocations = {}
+    fuelLocations = {},
+    miningMap = {},
+    checkQueue = BinaryHeap:new()
 }
 
 function Environment:getBlockAtPosition(coordinate)
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
+    local path = self.miningMap[tostring(coordinate)]
     if self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] then
         local blockType = self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]
         return blockType
+    elseif path then
+        return blockType.PATH
     else
         return blockType.UNKNOWN
     end
@@ -91,8 +99,31 @@ local function loadBlockers()
     logger:debug("Finished loading blockers from file")
 end
 
+local function generateMiningMap()
+    -- The mining map should be a set of static coordinates at which the robot should check for valuables.
+    -- For the mining operation to be efficient it is advised to use branch mining.
+    -- for example:
+    -- x||x||x||x||x
+    -- xxxxxxxxxxxxx
+    -- x||x||x||x||x
+    -- Where x marks the coordinates at which the robot should check for valuables.
+    -- and | marks the coordinates that should not be present in the mining map
+    -- The robot should start at the first x and move to the next x in the same row.
+    for x = -255, 255, 1 do
+        for z = -255, 255, 1 do
+            if x == 0 or z == 0 then
+                Environment.miningMap[tostring(Coordinate:new(x, 0, z))] = blockType.UNKNOWN
+            elseif x % 3 == 0 or z % 3 == 0 then
+                Environment.miningMap[tostring(Coordinate:new(x, 0, z))] = blockType.UNKNOWN
+            end
+        end
+    end
+end
+
 loadWasteBlocks()
 loadFuels()
+loadBlockers()
+generateMiningMap()
 
 function Environment:new()
     local o = {}
@@ -136,6 +167,8 @@ function Environment:insertCoordToCheckedBlocks(coordinate, blockType)
     self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] = blockType
     logger:debug("Finished inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
 end
+
+Environment:insertCoordToCheckedBlocks(Coordinate:new(0, 0, 0), blockType.AIR)
 
 function Environment:checkBlockType(block_type)
     if not block_type then
@@ -184,100 +217,155 @@ function Environment:storeFuelLocation(coordinate)
     logger:debug("Finished storing fuel location at coordinate " .. tostring(coordinate))
 end
 
-function Environment:dijkstra(source, target)
+function Environment:addPositionToCheckQueue(coordinate)
+    if getmetatable(coordinate) ~= Coordinate then
+        coordinate = Coordinate.parse(coordinate)
+    end
+    local blockType = self:getBlockAtPosition(coordinate)
+    local priority = self:getCost(blockType)
+    logger:debug("Adding position " .. tostring(coordinate) .. " to check queue with priority " .. tostring(priority))
+    self.checkQueue:insert(coordinate, priority)
+end
+
+function Environment:getClosestMiningPositions(position)
+    if getmetatable(position) ~= Coordinate then
+        position = Coordinate.parse(position)
+    end
+    logger:debug("Getting closest mining positions to " .. tostring(position))
+    local coordinates = {}
+    local heapObjects = {}
+    if self.checkQueue:isEmpty() then
+        -- It is not needed to get every position from the mining map.
+        for x = -2, 2, 1 do
+            for z = -2, 2, 1 do
+                local coordinate = Coordinate:new(position.x + x, 0, position.z + z)
+                if self.miningMap[tostring(coordinate)] then
+                    table.insert(coordinates, coordinate)
+                end
+            end
+        end
+    else
+        for i = 1, 5 do
+            table.insert(heapObjects, self.checkQueue:pop())
+            table.insert(coordinates, heapObjects[i].coordinate)
+        end
+    end
+    local path, target = self:dijkstra(position, coordinates)
+    for i, v in heapObjects do
+        if not v.coordinate:isEqual(target) then
+            self.checkQueue:insert(v.coordinate, v.priority - 1)
+        end
+    end
+end
+
+function Environment:dijkstra(source, targets)
     if getmetatable(source) ~= Coordinate then
         source = Coordinate.parse(source)
     end
-    if getmetatable(target) ~= Coordinate then
-        target = Coordinate.parse(target)
+    if getmetatable(targets) ~= Coordinate then
+        if pcall(Coordinate.parse(targets)) then
+            targets = {Coordinate.parse(targets)}
+        else
+            for i, target in ipairs(targets) do
+                if getmetatable(target) ~= Coordinate then
+                    targets[i] = Coordinate.parse(target)
+                end
+            end
+        end
+    else
+        targets = {targets}
     end
-    logger:debug("Starting Dijkstra algorithm from " .. tostring(source) .. " to " .. tostring(target))
+    logger:debug("Starting Dijkstra algorithm from " .. tostring(source) .. " to multiple targets")
     local distance = {}
     local previous = {}
     local queue = BinaryHeap:new()
-    local visited = {}
 
     for y, row in pairs(self.checkedBlocks) do
         for x, column in pairs(row) do
             for z, blockType in pairs(column) do
                 local coordinate = Coordinate:new(x, y, z)
-                if coordinate == source then
-                    distance[coordinate] = 0
+                if source:isEqual(coordinate) then
+                    distance[tostring(coordinate)] = 0
+                    queue:insert(coordinate, 0)
                 else
-                    distance[coordinate] = math.huge
+                    distance[tostring(coordinate)] = math.huge
+                    queue:insert(coordinate, math.huge + self:heuristic(coordinate, targets)) -- heuristic from the first target
                 end
-                queue:insert(coordinate, self:heuristic(coordinate, source) + self:heuristic(coordinate, target))
             end
         end
     end
-    distance[source] = 0
-    queue:insert(source, 0)
-    --queue:insert(source, distance[source] + self:heuristic(source, target))
-    --queue:insert(target, self:heuristic(source, target))
-    logger:debug(tostring(queue))
-    -- sleep for 10 second
-    -- os.sleep(10)
+
+    local targetReached = nil
     while not queue:isEmpty() do
         local current = queue:pop()
-        if not visited[current] then
-            visited[current] = true
-
-            if current == target then
+        for _, target in ipairs(targets) do
+            if current:isEqual(target) then
+                targetReached = target
                 break
             end
-            for direction, data in pairs(self:getNeighbours(current)) do
-                local alt = distance[current] + self:getCost(data.type)
-                logger:debug("New calculated distance for " .. tostring(data.position) .. " is " .. tostring(alt))
-                if distance[data.position] then
-                    --distance[data.position] = math.huge
-                    --queue:insert(data.position, 0)
-
-                    if alt < distance[data.position] then
-                        logger:debug("Updating distance for " .. tostring(data.position) .. " to " .. tostring(alt))
-                        distance[data.position] = alt
-                        previous[data.position] = current
-                        queue:decreaseKey(data.position, alt)
-                    end
-                end
+        end
+        if targetReached then
+            break
+        end
+        for direction, data in pairs(self:getNeighbours(current)) do
+            local alt = distance[tostring(current)] + self:getCost(data.type)
+            if not distance[tostring(data.position)] then
+                distance[tostring(data.position)] = math.huge
+                queue:insert(data.position, math.huge + self:heuristic(data.position, targets[1])) -- heuristic from the first target
+            end
+            if alt < distance[tostring(data.position)] then
+                distance[tostring(data.position)] = alt
+                previous[tostring(data.position)] = current
+                queue:decreaseKey(data.position, alt)
             end
         end
     end
 
     local path = {}
-    local u = target
-    if previous[u] or u == source then
+    local u = targetReached
+    local cost = distance[tostring(u)]
+    if previous[tostring(u)] or source:isEqual(u) then
         while u do
-            table.insert(path, 1, Distance:new(previous[u], u))
-            u = previous[u]
+            table.insert(path, 1, u)
+            u = previous[tostring(u)]
         end
     end
-
-    -- Add logging here
-    print("Path length: " .. #path)
-    for i, distance in ipairs(path) do
-        print("Step " .. i .. ": from " .. tostring(distance.from) .. " to " .. tostring(distance.to))
+    logger:debug("Finished Dijkstra algorithm from " .. tostring(source) .. " to multiple targets")
+    logger:debug("Path length: " .. #path)
+    for i, v in pairs(path) do
+        logger:debug("Path[" .. i .. "]: " .. tostring(v))
     end
+    logger:debug("Cost: " .. tostring(cost))
 
-    return path
+    return Distance.fromPath(path), targetReached, cost
 end
 
 function Environment:getCost(_blockType)
     if not _blockType then
-        _blockType = blockType.AIR
+        _blockType = blockType.UNKNOWN
     end
     if _blockType == blockType.FUEL or _blockType == blockType.AIR then
         return 1
     elseif _blockType == blockType.WASTE or _blockType == blockType.OTHER then
         return 10
+    elseif _blockType == blockType.PATH then
+        return 5
     else
         return 1000
     end
 end
 
 -- Add a heuristic function to estimate the cost from the current node to the target
-function Environment:heuristic(current, target)
-    local dx = math.abs(current.x - target.x)
-    local dy = math.abs(current.y - target.y)
-    local dz = math.abs(current.z - target.z)
-    return dx + dy + dz -- Use Manhattan distance as the heuristic
+function Environment:heuristic(current, targets)
+    local minDistance = math.huge
+    for _, target in ipairs(targets) do
+        local dx = math.abs(current.x - target.x)
+        local dy = math.abs(current.y - target.y)
+        local dz = math.abs(current.z - target.z)
+        local distance = dx + dy + dz -- Manhattan distance
+        if distance < minDistance then
+            minDistance = distance
+        end
+    end
+    return minDistance
 end

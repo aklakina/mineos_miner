@@ -155,7 +155,18 @@ function Coordinate:__tostring()
     return "["..self.x..", "..self.y..", "..self.z.."]"
 end
 
+function Coordinate:isEqual(o)
+    if not (getmetatable(o) == Coordinate) then
+        o = Coordinate.parse(o)
+    end
+    if o == nil then
+        return false
+    end
+    return self.x == o.x and self.y == o.y and self.z == o.z
+end
+
 function Coordinate.__eq(o, t)
+    error("DEPRECATED")
     logger:debug("Comparing " .. tostring(o) .. " and " .. tostring(t))
     if getmetatable(t) ~= Coordinate then
         t = Coordinate.parse(t)
@@ -171,6 +182,16 @@ function Coordinate.__eq(o, t)
     return o.x == t.x and o.y == t.y and o.z == t.z
 end
 
+function Coordinate:isSimpleMovement(o)
+    if not (getmetatable(o) == Coordinate) then
+        o = Coordinate.parse(o)
+    end
+    if o == nil then
+        return false
+    end
+    return (self.x == o.x and self.y == o.y) or (self.x == o.x and self.z == o.z) or (self.y == o.y and self.z == o.z)
+end
+
 Distance = {
     x = {direction = directions.right, distance = 0},
     y = {direction = directions.up, distance = 0},
@@ -178,18 +199,37 @@ Distance = {
     distance = Coordinate:new(0, 0, 0, directions.any)
 }
 
-function Distance:new(t, o)
-    if not (getmetatable(t) == Coordinate) then
-        t = Coordinate.parse(t)
+function Distance.parse(o)
+    if getmetatable(o) == Distance then
+        return o
+    elseif type(o) == "table" then
+        if o.x and o.y and o.z then
+            return Distance:new({0, 0, 0}, {o.x, o.y, o.z})
+        elseif type(o[1]) == "number" and type(o[2]) == "number" and type(o[3]) == "number" then
+            return Distance:new({0, 0, 0}, {o[1], o[2], o[3]})
+        else
+            error("Invalid arguments for Distance.parse")
+        end
+    elseif o == nil then
+        return nil
+    else
+        logger:error("Invalid arguments for Distance.parse, got: " .. type(o))
+        error("Invalid arguments for Distance.parse")
     end
-    if not (getmetatable(o) == Coordinate) then
-        o = Coordinate.parseInto(o)
+end
+
+function Distance:new(origin, target)
+    if not (getmetatable(origin) == Coordinate) then
+        origin = Coordinate.parse(origin)
+    end
+    if not (getmetatable(target) == Coordinate) then
+        target = Coordinate.parse(target)
     end
     local _ret = {
-        x = {direction = o.x - t.x < 0 and directions.left or directions.right, distance = o.x - t.x},
-        y = {direction = o.y - t.y < 0 and directions.down or directions.up, distance = o.y - t.y},
-        z = {direction = o.z - t.z < 0 and directions.back or directions.forward, distance = o.z - t.z},
-        distance = Coordinate:new(o.x - t.x, o.y - t.y, o.z - t.z, directions.any)
+        x = { direction = target.x - origin.x < 0 and directions.left or directions.right, distance = math.abs(target.x - origin.x)},
+        y = { direction = target.y - origin.y < 0 and directions.down or directions.up, distance = math.abs(target.y - origin.y)},
+        z = { direction = target.z - origin.z < 0 and directions.back or directions.forward, distance = math.abs(target.z - origin.z)},
+        distance = Coordinate:new(target.x - origin.x, target.y - origin.y, target.z - origin.z, directions.any)
     }
     setmetatable(_ret, self)
     self.__index = self
@@ -198,4 +238,67 @@ end
 
 function Distance:getAbsolute()
     return math.sqrt(self.distance * self.distance)
+end
+
+function Distance:isEqual(o)
+    if not (getmetatable(o) == Distance) then
+        o = Distance.parse(o)
+    end
+    if o == nil then
+        return false
+    end
+    return self.distance:isEqual(o.distance)
+end
+
+function Distance:__tostring()
+    return "[".. self.x.direction.name.. ": " ..self.x.distance..", "..self.y.direction.name.. ": " ..self.y.distance..", "..self.z.direction.name.. ": " ..self.z.distance.."]"
+end
+
+function Distance.merge(o, t)
+    if not (getmetatable(o) == Distance) then
+        o = Distance.parse(o)
+    end
+    if not (getmetatable(t) == Distance) then
+        t = Distance.parse(t)
+    end
+    if o == nil or t == nil then
+        return o and o or t
+    end
+    return Distance:new({0, 0, 0}, o.distance + t.distance)
+end
+
+function Distance.checkIfStraight(o, t)
+    if not (getmetatable(o) == Distance) then
+        o = Distance.parse(o)
+    end
+    if not (getmetatable(t) == Distance) then
+        t = Distance.parse(t)
+    end
+    if o == nil or t == nil then
+        return false
+    end
+    -- If the difference in the two distances is only on 1 axis and the other two are 0, then the two distances are straight
+    return o.distance:isSimpleMovement(t.distance)
+end
+
+function Distance.fromPath(path)
+    logger:debug("Merging straight movements")
+    local distances = {}
+    -- Every consecutive coordinate change on the same axis can be merged into one distance vector
+    table.insert(distances, Distance:new(path[1], path[2]))
+    for i = 3, #path do
+        local dist = Distance:new(path[i-1], path[i])
+        if not Distance.checkIfStraight(distances[#distances], dist) then
+            table.insert(distances, dist)
+            logger:debug("Movement: ".. tostring(path[i-1]) .. " to " .. tostring(path[i]) .. " is not straight from ".. tostring(path[i-2]) .. " to " .. tostring(path[i-1]) .. ". Adding new distance vector")
+        else
+            distances[#distances] = Distance.merge(distances[#distances], dist)
+            logger:debug("Movement: ".. tostring(path[i-1]) .. " to " .. tostring(path[i]) .. " is straight from ".. tostring(path[i-2]) .. " to " .. tostring(path[i-1]) .. ". Merging distance vectors")
+        end
+    end
+    logger:debug("Merged distances: ")
+    for i, v in ipairs(distances) do
+        logger:debug(tostring(v))
+    end
+    return distances
 end

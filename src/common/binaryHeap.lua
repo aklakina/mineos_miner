@@ -52,6 +52,7 @@ function BinaryHeap:insert(coordinate, priority)
         self.heap[i], self.heap[self:parent(i)] = self.heap[self:parent(i)], self.heap[i]
         i = self:parent(i)
     end
+    self:minHeapify(#self.heap + 1)
 end
 
 function BinaryHeap:minHeapify(i)
@@ -78,7 +79,7 @@ function BinaryHeap:pop()
     self.heap[1] = self.heap[#self.heap]
     table.remove(self.heap)
     self:minHeapify(1)
-    return min.coordinate
+    return min.coordinate, min.priority
 end
 
 function BinaryHeap:isEmpty()
@@ -90,7 +91,7 @@ function BinaryHeap:decreaseKey(coordinate, newPriority)
         coordinate = Coordinate.parse(coordinate)
     end
     for i, v in ipairs(self.heap) do
-        if v.coordinate == coordinate then
+        if v.coordinate:isEqual(coordinate) then
             self.heap[i].priority = newPriority
             while i > 1 and self.heap[self:parent(i)].priority > self.heap[i].priority do
                 self.heap[i], self.heap[self:parent(i)] = self.heap[self:parent(i)], self.heap[i]

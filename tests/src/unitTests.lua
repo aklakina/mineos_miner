@@ -38,7 +38,7 @@ end
 function TestCoordinate:testEquality()
     local coordinate1 = Coordinate:new(1, 2, 3, directions.any)
     local coordinate2 = Coordinate:new(1, 2, 3, directions.forward)
-    lu.assertEquals(coordinate1, coordinate2)
+    lu.assertEvalToTrue(coordinate1:isEqual(coordinate2))
 end
 
 TestDirection = {}
@@ -66,9 +66,9 @@ function TestDistance:testNewDistance()
     local coordinate1 = Coordinate:new(1, 2, 3, directions.forward)
     local coordinate2 = Coordinate:new(4, 5, 6, directions.right)
     local distance = Distance:new(coordinate2, coordinate1)
-    lu.assertEquals(distance.x.distance, -3)
-    lu.assertEquals(distance.y.distance, -3)
-    lu.assertEquals(distance.z.distance, -3)
+    lu.assertEquals(distance.x.distance, 3)
+    lu.assertEquals(distance.y.distance, 3)
+    lu.assertEquals(distance.z.distance, 3)
 end
 
 function TestDistance:testGetDistance()
@@ -76,6 +76,67 @@ function TestDistance:testGetDistance()
     local coordinate2 = Coordinate:new(4, 5, 6, directions.right)
     local distance = Distance:new(coordinate1, coordinate2)
     lu.assertEquals(distance:getAbsolute(), math.sqrt(27))
+end
+
+function TestDistance:isEqualWithEqualDistances()
+    local distance1 = Distance:new(Coordinate:new(1, 2, 3), Coordinate:new(4, 5, 6))
+    local distance2 = Distance:new(Coordinate:new(1, 2, 3), Coordinate:new(4, 5, 6))
+    lu.assertTrue(distance1:isEqual(distance2))
+end
+
+function TestDistance:isEqualWithUnequalDistances()
+    local distance1 = Distance:new(Coordinate:new(1, 2, 3), Coordinate:new(4, 5, 6))
+    local distance2 = Distance:new(Coordinate:new(1, 2, 3), Coordinate:new(5, 6, 7))
+    lu.assertFalse(distance1:isEqual(distance2))
+end
+
+function TestDistance:isEqualWithNonDistanceObject()
+    local distance = Distance:new(Coordinate:new(1, 2, 3), Coordinate:new(4, 5, 6))
+    lu.assertFalse(distance:isEqual({x = 3, y = 3, z = 3}))
+end
+
+function TestDistance:fromPathWithStraightPath()
+    local path = {
+        Coordinate:new(1, 1, 1),
+        Coordinate:new(2, 1, 1),
+        Coordinate:new(3, 1, 1),
+        Coordinate:new(4, 1, 1)
+    }
+    local distances = Distance.fromPath(path)
+    lu.assertEquals(#distances, 3)
+    lu.assertEquals(distances[1].x.distance, 1)
+    lu.assertEquals(distances[2].x.distance, 1)
+    lu.assertEquals(distances[3].x.distance, 1)
+end
+
+function TestDistance:fromPathWithZigZagPath()
+    local path = {
+        Coordinate:new(1, 1, 1),
+        Coordinate:new(2, 1, 1),
+        Coordinate:new(2, 1, 2),
+        Coordinate:new(3, 1, 2),
+        Coordinate:new(3, 1, 3)
+    }
+    local distances = Distance.fromPath(path)
+    lu.assertEquals(#distances, 4)
+    lu.assertEquals(distances[1].x.distance, 1)
+    lu.assertEquals(distances[2].z.distance, 1)
+    lu.assertEquals(distances[3].x.distance, 1)
+    lu.assertEquals(distances[4].z.distance, 1)
+end
+
+function TestDistance:fromPathWithEmptyPath()
+    local path = {}
+    local distances = Distance.fromPath(path)
+    lu.assertEquals(#distances, 0)
+end
+
+function TestDistance:fromPathWithSinglePointPath()
+    local path = {
+        Coordinate:new(1, 1, 1)
+    }
+    local distances = Distance.fromPath(path)
+    lu.assertEquals(#distances, 0)
 end
 
 require('binaryHeap')
@@ -117,6 +178,42 @@ end
 
 function TestBinaryHeap:testIsEmpty()
     lu.assertTrue(self.binaryHeap:isEmpty())
+    self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
+    lu.assertFalse(self.binaryHeap:isEmpty())
+end
+
+function TestBinaryHeap:testInsertWithExistingPriority()
+    self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
+    self.binaryHeap:insert(Coordinate:new(4, 5, 6), 1)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.x, 1)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.y, 2)
+    lu.assertEquals(self.binaryHeap.heap[1].coordinate.z, 3)
+    lu.assertEquals(self.binaryHeap.heap[1].priority, 1)
+    lu.assertEquals(self.binaryHeap.heap[2].coordinate.x, 4)
+    lu.assertEquals(self.binaryHeap.heap[2].coordinate.y, 5)
+    lu.assertEquals(self.binaryHeap.heap[2].coordinate.z, 6)
+    lu.assertEquals(self.binaryHeap.heap[2].priority, 1)
+end
+
+function TestBinaryHeap:testPopWithEmptyHeap()
+    local coordinate = self.binaryHeap:pop()
+    lu.assertEquals(coordinate, nil)
+end
+
+function TestBinaryHeap:testDecreaseKeyWithNonExistingCoordinate()
+    local coordinate = Coordinate:new(7, 8, 9)
+    self.binaryHeap:decreaseKey(coordinate, 1)
+    lu.assertEquals(#self.binaryHeap.heap, 0)
+end
+
+function TestBinaryHeap:testDecreaseKeyWithExistingCoordinate()
+    local coordinate = Coordinate:new(1, 2, 3)
+    self.binaryHeap:insert(coordinate, 2)
+    self.binaryHeap:decreaseKey(coordinate, 1)
+    lu.assertEquals(self.binaryHeap.heap[1].priority, 1)
+end
+
+function TestBinaryHeap:testIsEmptyWithNonEmptyHeap()
     self.binaryHeap:insert(Coordinate:new(1, 2, 3), 1)
     lu.assertFalse(self.binaryHeap:isEmpty())
 end
@@ -366,34 +463,33 @@ function TestEnvironment:testDijkstraWithPopulatedCheckedBlocks()
     local source = Coordinate:new(1, 2, 3)
     local target = Coordinate:new(4, 5, 6)
     for y = 0, 6 do
-        environment.checkedBlocks[y] = {}
         for x = 0, 6 do
-            environment.checkedBlocks[y][x] = {}
             for z = 0, 6 do
-                environment.checkedBlocks[y][x][z] = blockType.WASTE
+                environment:insertCoordToCheckedBlocks({x, y, z}, blockType.WASTE)
             end
         end
     end
-    local path = environment:dijkstra(source, target)
+    -- The source and the targe should be AIR as well as a well defined path that should be asserted in the path
+    environment:insertCoordToCheckedBlocks({1, 2, 3}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({4, 5, 6}, blockType.AIR)
+
+    -- The path
+    environment:insertCoordToCheckedBlocks({1, 2, 4}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({1, 2, 5}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({1, 2, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({2, 2, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({3, 2, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({4, 2, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({4, 3, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({4, 4, 6}, blockType.AIR)
+    environment:insertCoordToCheckedBlocks({4, 5, 6}, blockType.AIR)
+
+    local path, cost = environment:dijkstra(source, target)
+
     lu.assertEquals(#path, 3)
-    lu.assertEquals(path[1].from.x, 1)
-    lu.assertEquals(path[1].from.y, 2)
-    lu.assertEquals(path[1].from.z, 3)
-    lu.assertEquals(path[1].to.x, 2)
-    lu.assertEquals(path[1].to.y, 2)
-    lu.assertEquals(path[1].to.z, 3)
-    lu.assertEquals(path[2].from.x, 2)
-    lu.assertEquals(path[2].from.y, 2)
-    lu.assertEquals(path[2].from.z, 3)
-    lu.assertEquals(path[2].to.x, 3)
-    lu.assertEquals(path[2].to.y, 2)
-    lu.assertEquals(path[2].to.z, 3)
-    lu.assertEquals(path[3].from.x, 3)
-    lu.assertEquals(path[3].from.y, 2)
-    lu.assertEquals(path[3].from.z, 3)
-    lu.assertEquals(path[3].to.x, 4)
-    lu.assertEquals(path[3].to.y, 2)
-    lu.assertEquals(path[3].to.z, 3)
+    lu.assertEvalToTrue(path[1]:isEqual({0, 0, 3}))
+    lu.assertEvalToTrue(path[2]:isEqual({3, 0, 0}))
+    lu.assertEvalToTrue(path[3]:isEqual({0, 3, 0}))
 end
 
 os.exit(lu.LuaUnit.run())
