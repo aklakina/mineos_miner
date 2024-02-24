@@ -67,6 +67,8 @@ jobs:
 
       - name: Run the compile script
         run: ./compile.sh
+        env:
+          PATH: /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin:$PATH
 
       - name: Zip the compiled files
         run: zip -r compiled.zip ./compiled
