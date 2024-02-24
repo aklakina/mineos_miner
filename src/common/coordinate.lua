@@ -90,7 +90,9 @@ Coordinate = {
 }
 
 function Coordinate.parse(o)
-    if type(o) == "table" then
+    if getmetatable(o) == Coordinate then
+        return o
+    elseif type(o) == "table" then
         if o.x and o.y and o.z then
             return Coordinate:new(o.x, o.y, o.z, o.direction or directions.any)
         elseif type(o[1]) == "number" and type(o[2]) == "number" and type(o[3]) == "number" then
@@ -98,8 +100,6 @@ function Coordinate.parse(o)
         else
             error("Invalid arguments for Coordinate.parse")
         end
-    elseif getmetatable(o) == Coordinate then
-        return o
     elseif o == nil then
         return nil
     else
@@ -155,14 +155,15 @@ function Coordinate:__tostring()
     return "["..self.x..", "..self.y..", "..self.z.."]"
 end
 
-function Coordinate:__eq(o, t)
+function Coordinate.__eq(o, t)
+    logger:debug("Comparing " .. tostring(o) .. " and " .. tostring(t))
     if getmetatable(t) ~= Coordinate then
         t = Coordinate.parse(t)
     end
     if getmetatable(o) ~= Coordinate then
         o = Coordinate.parse(o)
     end
-    if o == t == nil then
+    if o == nil and t == nil then
         return true
     elseif o == nil or t == nil then
         return false

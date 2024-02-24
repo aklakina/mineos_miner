@@ -13,6 +13,15 @@ require('coordinate')
 BinaryHeap = {}
 BinaryHeap.__index = BinaryHeap
 
+function BinaryHeap:__tostring()
+    local str = "BinaryHeap: {"
+    for i, v in ipairs(self.heap) do
+        str = str .. "\n\t" .. tostring(v.coordinate) .. " : " .. v.priority
+    end
+    str = str .. "\n}"
+    return str
+end
+
 function BinaryHeap:new()
     local newHeap = {}
     setmetatable(newHeap, self)

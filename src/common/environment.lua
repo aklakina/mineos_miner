@@ -8,7 +8,7 @@ require('Logger')
 
 require('coordinate')
 
-local logger = Logger:new(Logger.levels.TRACE, "Environment")
+local logger = Logger:new(Logger.levels.DEBUG, "Environment")
 
 blockType = {
     WASTE = {},
@@ -31,23 +31,31 @@ function Environment:getBlockAtPosition(coordinate)
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
-    local blockType = self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] or blockType.UNKNOWN
-    return blockType
+    if self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] then
+        local blockType = self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]
+        return blockType
+    else
+        return blockType.UNKNOWN
+    end
 end
 
 function Environment:getNeighbours(coordinate)
     local neighbours = {}
     for _, v in pairs(directions) do
-        local neighbour = coordinate + v.vector
-        local blockType = self:getBlockAtPosition(neighbour)
-        table.insert(neighbours, {[v] = {position = neighbour, type = blockType}})
+        if getmetatable(v) == Direction and v.name ~= "any" then
+            logger:trace("Checking neighbour in direction " .. tostring(v.name))
+            local neighbour = coordinate + v.vector
+            logger:trace("Neighbour in direction " .. tostring(v.name) .. " is at position " .. tostring(neighbour))
+            local blockType = self:getBlockAtPosition(neighbour)
+            neighbours[v] = {position = neighbour, type = blockType}
+        end
     end
     return neighbours
 end
 
 -- load wasteBlocks from file
 local function loadWasteBlocks()
-    logger:debug("Starting to load waste blocks from file")
+    logger:trace("Starting to load waste blocks from file")
     local file = io.open("wasteBlocks", "r")
     local line = file:read()
     while line do
@@ -55,12 +63,12 @@ local function loadWasteBlocks()
         line = file:read()
     end
     file:close()
-    logger:debug("Finished loading waste blocks from file")
+    logger:trace("Finished loading waste blocks from file")
 end
 
 -- load fuels from file
 local function loadFuels()
-    logger:debug("Starting to load fuels from file")
+    logger:trace("Starting to load fuels from file")
     local file = io.open("fuels", "r")
     local line = file:read()
     while line do
@@ -68,7 +76,7 @@ local function loadFuels()
         line = file:read()
     end
     file:close()
-    logger:debug("Finished loading fuels from file")
+    logger:trace("Finished loading fuels from file")
 end
 
 local function loadBlockers()
@@ -177,9 +185,17 @@ function Environment:storeFuelLocation(coordinate)
 end
 
 function Environment:dijkstra(source, target)
+    if getmetatable(source) ~= Coordinate then
+        source = Coordinate.parse(source)
+    end
+    if getmetatable(target) ~= Coordinate then
+        target = Coordinate.parse(target)
+    end
+    logger:debug("Starting Dijkstra algorithm from " .. tostring(source) .. " to " .. tostring(target))
     local distance = {}
     local previous = {}
     local queue = BinaryHeap:new()
+    local visited = {}
 
     for y, row in pairs(self.checkedBlocks) do
         for x, column in pairs(row) do
@@ -190,24 +206,39 @@ function Environment:dijkstra(source, target)
                 else
                     distance[coordinate] = math.huge
                 end
-                queue:insert(coordinate, distance[coordinate] + self:heuristic(coordinate, target))
+                queue:insert(coordinate, self:heuristic(coordinate, source) + self:heuristic(coordinate, target))
             end
         end
     end
-
+    distance[source] = 0
+    queue:insert(source, 0)
+    --queue:insert(source, distance[source] + self:heuristic(source, target))
+    --queue:insert(target, self:heuristic(source, target))
+    logger:debug(tostring(queue))
+    -- sleep for 10 second
+    -- os.sleep(10)
     while not queue:isEmpty() do
         local current = queue:pop()
+        if not visited[current] then
+            visited[current] = true
 
-        if current == target then
-            break
-        end
+            if current == target then
+                break
+            end
+            for direction, data in pairs(self:getNeighbours(current)) do
+                local alt = distance[current] + self:getCost(data.type)
+                logger:debug("New calculated distance for " .. tostring(data.position) .. " is " .. tostring(alt))
+                if distance[data.position] then
+                    --distance[data.position] = math.huge
+                    --queue:insert(data.position, 0)
 
-        for direction, data in pairs(self:getNeighbours(current)) do
-            local alt = distance[current] + self:getCost(data.type)
-            if alt < distance[data.position] then
-                distance[data.position] = alt
-                previous[data.position] = current
-                queue:decreaseKey(data.position, alt + self:heuristic(data.position, target))
+                    if alt < distance[data.position] then
+                        logger:debug("Updating distance for " .. tostring(data.position) .. " to " .. tostring(alt))
+                        distance[data.position] = alt
+                        previous[data.position] = current
+                        queue:decreaseKey(data.position, alt)
+                    end
+                end
             end
         end
     end
@@ -221,16 +252,25 @@ function Environment:dijkstra(source, target)
         end
     end
 
+    -- Add logging here
+    print("Path length: " .. #path)
+    for i, distance in ipairs(path) do
+        print("Step " .. i .. ": from " .. tostring(distance.from) .. " to " .. tostring(distance.to))
+    end
+
     return path
 end
 
-function Environment:getCost(blockType)
-    if blockType == blockType.FUEL or blockType == blockType.AIR then
+function Environment:getCost(_blockType)
+    if not _blockType then
+        _blockType = blockType.AIR
+    end
+    if _blockType == blockType.FUEL or _blockType == blockType.AIR then
         return 1
-    elseif blockType == blockType.WASTE or blockType == blockType.OTHER then
+    elseif _blockType == blockType.WASTE or _blockType == blockType.OTHER then
         return 10
     else
-        return math.huge
+        return 1000
     end
 end
 

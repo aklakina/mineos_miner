@@ -35,6 +35,12 @@ function TestCoordinate:testMultiplyCoordinates()
     lu.assertEquals(result.z, 6)
 end
 
+function TestCoordinate:testEquality()
+    local coordinate1 = Coordinate:new(1, 2, 3, directions.any)
+    local coordinate2 = Coordinate:new(1, 2, 3, directions.forward)
+    lu.assertEquals(coordinate1, coordinate2)
+end
+
 TestDirection = {}
 
 function TestDirection:testNewDirection()
@@ -359,16 +365,15 @@ function TestEnvironment:testDijkstraWithPopulatedCheckedBlocks()
     local environment = Environment:new()
     local source = Coordinate:new(1, 2, 3)
     local target = Coordinate:new(4, 5, 6)
-    environment.checkedBlocks = {
-        [2] = {
-            [1] = { [3] = blockType.AIR },
-            [2] = { [3] = blockType.AIR },
-            [3] = { [3] = blockType.AIR },
-            [4] = { [3] = blockType.AIR },
-            [5] = { [3] = blockType.AIR },
-            [6] = { [3] = blockType.AIR }
-        }
-    }
+    for y = 0, 6 do
+        environment.checkedBlocks[y] = {}
+        for x = 0, 6 do
+            environment.checkedBlocks[y][x] = {}
+            for z = 0, 6 do
+                environment.checkedBlocks[y][x][z] = blockType.WASTE
+            end
+        end
+    end
     local path = environment:dijkstra(source, target)
     lu.assertEquals(#path, 3)
     lu.assertEquals(path[1].from.x, 1)
