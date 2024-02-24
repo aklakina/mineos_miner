@@ -41,7 +41,7 @@ jobs:
       - name: Run lua unit tests
         run: cd ./build && /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin/lua unitTests.lua
 
-  job:
+  compile:
     needs: build
     runs-on: ubuntu-latest
 
@@ -53,6 +53,9 @@ jobs:
         with:
           repository: stravant/LuaMinify
           path: LuaMinify
+
+      - name: add permissions
+        run: chmod u+rwx -R ./*
 
       - name: Setup Lua with Luver
         uses: MunifTanjim/luver-action@v1.2.1
