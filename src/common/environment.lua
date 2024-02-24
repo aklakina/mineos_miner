@@ -311,7 +311,7 @@ function Environment:dijkstra(source, targets)
             local alt = distance[tostring(current)] + self:getCost(data.type)
             if not distance[tostring(data.position)] then
                 distance[tostring(data.position)] = math.huge
-                queue:insert(data.position, math.huge + self:heuristic(data.position, targets[1])) -- heuristic from the first target
+                queue:insert(data.position, math.huge + self:heuristic(data.position, targets)) -- heuristic from the first target
             end
             if alt < distance[tostring(data.position)] then
                 distance[tostring(data.position)] = alt
