@@ -34,9 +34,6 @@ jobs:
           default: 5.4.6
           # Lua versions to install.
           lua_versions: 5.4.6
-    
-      - name: Install luaunit
-        run: luarocks install luaunit
 
       - name: Create the build directory with the test sources
         run: ./build.sh
