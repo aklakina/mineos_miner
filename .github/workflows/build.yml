@@ -34,11 +34,6 @@ jobs:
           default: 5.4.6
           # Lua versions to install.
           lua_versions: 5.4.6
-
-      - name: Install LuaRocks (latest)
-        uses: jkl1337/gh-actions-luarocks@v5
-        with:
-          withLuaPath: /home/runner/.local/share/luver/lua-versions/5.4.6/installation
     
       - name: Install luaunit
         run: luarocks install luaunit
@@ -48,3 +43,36 @@ jobs:
 
       - name: Run lua unit tests
         run: cd ./build && /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin/lua unitTests.lua
+
+  job:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Get lua minifier
+        uses: actions/checkout@v4.1.1
+        with:
+          repository: stravant/LuaMinify
+          path: LuaMinify
+
+      - name: Setup Lua with Luver
+        uses: MunifTanjim/luver-action@v1.2.1
+        with:
+        # Lua version to set as default.
+        default: 5.4.6
+        # Lua versions to install.
+        lua_versions: 5.4.6
+
+      - name: Run the compile script
+        run: ./compile.sh
+
+      - name: Zip the compiled files
+        run: zip -r compiled.zip ./compiled
+
+      - name: Upload the compiled files
+        uses: actions/upload-artifact@v2
+        with:
+          name: compiled
+          path: compiled.zip

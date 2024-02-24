@@ -256,6 +256,7 @@ function Environment:getClosestMiningPositions(position)
             self.checkQueue:insert(v.coordinate, v.priority - 1)
         end
     end
+    return path
 end
 
 function Environment:dijkstra(source, targets)
@@ -295,7 +296,7 @@ function Environment:dijkstra(source, targets)
         if targetReached then
             break
         end
-        for direction, data in pairs(self:getNeighbours(current)) do
+        for _, data in pairs(self:getNeighbours(current)) do
             local alt = distance[tostring(current)] + self:getCost(data.type)
             if alt < (distance[tostring(data.position)] and distance[tostring(data.position)] or math.huge) then
                 distance[tostring(data.position)] = alt

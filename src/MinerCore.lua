@@ -158,16 +158,15 @@ function check()
             break
         end
     end
-    local directions = environment:getClosestMiningPositions(betterTurtle.position)
-    for _, v in pairs(directions) do
-        betterTurtle:moveDistance(v)
-    end
 end
 
 function main()
     while not stop do
-        while ok do
-
+        while minerState ~= minerStates.RETURNING do
+            local directions = environment:getClosestMiningPositions(betterTurtle.position)
+            for _, v in pairs(directions) do
+                betterTurtle:moveDistance(v)
+            end
         end
         --not ok, return to base
         print( "[main]: Returning to base!" )

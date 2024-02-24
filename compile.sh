@@ -3,7 +3,7 @@
 # Define directories
 src_dir="$(pwd)/src"
 compiled_dir="$(pwd)/compiled"
-lua_minify_dir="$HOME/LuaMinify"
+lua_minify_dir="LuaMinify"
 
 rm -rf $compiled_dir
 mkdir $compiled_dir

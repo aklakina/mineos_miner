@@ -57,7 +57,7 @@ end
 
 function TestDirection:testGetInverseMovementVector()
     local inverse = directions.getInverseMovementVector("right")
-    lu.assertEquals(tostring(inverse), "[-1, -0, -0]")
+    lu.assertEvalToTrue(inverse:isEqual({-1, 0, 0}))
 end
 
 TestDistance = {}
@@ -347,7 +347,7 @@ function TestBetterTurtle:testTurtleActions()
 
     self.betterTurtle:relativeTurn("right")
     lu.assertEquals(self.betterTurtle.direction, directions.back)
-    lu.assertEquals(tostring(self.betterTurtle.position), "[0, 0, 0]")
+    lu.assertEvalToTrue(self.betterTurtle.position:isEqual({0, 0, 0}))
     lu.assertEquals(minecraftAPI_callHistory, {"turtle.turnRight"})
     turtle.reset()
 
@@ -362,17 +362,17 @@ function TestBetterTurtle:testTurtleActions()
     turtle.reset()
 
     self.betterTurtle:move("forward")
-    lu.assertEquals(tostring(self.betterTurtle.position), "[0, 0, 1]")
+    lu.assertEvalToTrue(self.betterTurtle.position:isEqual({0, 0, 1}))
     turtle.reset()
 
     self.betterTurtle:moveToPosition({1, 1, 1})
-    lu.assertEquals(tostring(self.betterTurtle.position), "[1, 1, 1]")
+    lu.assertEvalToTrue(self.betterTurtle.position:isEqual({1, 1, 1}))
     turtle.reset()
 
     turtle.blocked = true
     self.betterTurtle:moveToPosition({1, 1, 1})
     lu.assertEquals(minecraftAPI_callHistory, {})
-    lu.assertEquals(tostring(self.betterTurtle.position), "[1, 1, 1]")
+    lu.assertEvalToTrue(self.betterTurtle.position:isEqual({1, 1, 1}))
 end
 
 TestBetterTurtleMove = {}
