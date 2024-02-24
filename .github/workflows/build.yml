@@ -66,15 +66,12 @@ jobs:
           lua_versions: 5.4.6
 
       - name: Run the compile script
-        run: ./compile.sh
+        run: ./compile.sh ./LuaMinify "false"
         env:
           PATH: /home/runner/.local/share/luver/lua-versions/5.4.6/installation/bin:$PATH
-
-      - name: Zip the compiled files
-        run: zip -r compiled.zip ./compiled
 
       - name: Upload the compiled files
         uses: actions/upload-artifact@v2
         with:
           name: compiled
-          path: compiled.zip
+          path: ./compiled

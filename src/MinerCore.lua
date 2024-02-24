@@ -10,6 +10,7 @@ local logger = Logger:new(Logger.levels.INFO, "MinerCore")
 require('coordinate')
 require('betterTurtle')
 local betterTurtle = BetterTurtle:new()
+local oldTurtle = betterTurtle
 require('environment')
 local environment = Environment:new()
 require('mutex')
@@ -17,8 +18,10 @@ require('mutex')
 minerStates = {
     MINING = {},
     FUELING = {},
+    NEEDS_FUEL = {},
     SEARCHING = {},
-    RETURNING = {}
+    RETURNING = {},
+    STOPPING = {}
 }
 
 minerState = minerStates.SEARCHING
@@ -45,29 +48,31 @@ function loadConfig()
 end
 
 local config = loadConfig()
+logger:info("Loaded config: {")
 for key, value in pairs(config) do
-    print(key, value)
+    logger:info(key .. " = " .. value)
 end
+logger:info("}")
 
 function dumpWaste()
     local num_dumped = 0
-    print("[dumpWaste]: Will dump the following blocks:")
+    logger:debug("[dumpWaste]: Dumping waste")
     for i = 1, 14 do
         local count = betterTurtle.getItemCount( i )
         local detail = betterTurtle.getItemDetail( i )
-        if detail ~= nil and environment:checkBlockType(detail) == blockType.WASTE then
+        if detail ~= nil and environment:checkBlockType(detail.name) == blockType.WASTE then
+            logger:trace("[dumpWaste]: - "..detail.name.." (x"..count..")")
             betterTurtle.select( i )
             betterTurtle.drop( count )
             num_dumped = num_dumped + count
-            print("[dumpWaste]: - "..detail.name.." (x"..count..")")
         end
     end
     if num_dumped == 0 then
-        print("[dumpWaste]: No blocks")
+        logger:trace("[dumpWaste]: No waste to dump")
     end
-    print("[dumpWaste]: Dumped "..num_dumped.." blocks of waste!")
-    num_dumped = 0
+    logger:debug("[dumpWaste]: Dumped "..num_dumped.." items")
     betterTurtle.select( 1 )
+    return num_dumped
 end
 
 function dumperLoop()
@@ -90,6 +95,7 @@ end
 function suckLava(direction, _blockType, blockPos)
     if _blockType == blockType.FUEL then
         if betterTurtle.getFuelLevel() > 90000 then
+            logger:trace("[check]: Fuel level is high enough, not refueling")
             environment:storeFuelLocation(blockPos)
             minerState = minerStates.SEARCHING
             return false
@@ -100,106 +106,156 @@ function suckLava(direction, _blockType, blockPos)
             print( "[check]: Lava detected!" )
             if betterTurtle.refuel() then
                 print( "[check]: Refueled using lava source!" )
-                local lastDirection = betterTurtle.direction
-                betterTurtle:move(direction, true)
-                environment:insertCoordToCheckedBlocks(betterTurtle.position, blockType.AIR)
                 betterTurtle.select( 1 )
+                if minerState ~= minerStates.RETURNING then
+                    minerState = minerStates.FUELING
+                end
                 Mutex:unlock("suckLava")
-                minerState = minerStates.FUELING
+                environment:removeFuelLocation(blockPos)
                 return true
             else
                 print( "[check]: Liquid was not lava!" )
                 betterTurtle.place()
                 betterTurtle.select( 1 )
+                if minerState ~= minerStates.RETURNING then
+                    minerState = minerStates.SEARCHING
+                end
                 Mutex:unlock("suckLava")
-                minerState = minerStates.SEARCHING
-                return false
             end
         end
     end
+    return false
 end
 
-function mineVein(direction, _blockType)
+function mineVein(_blockType)
     if _blockType == blockType.OTHER then
-        betterTurtle:move(direction, true)
-        environment:insertCoordToCheckedBlocks(betterTurtle.position, blockType.AIR)
-        minerState = minerStates.MINING
+        mutex:lock("mineVein")
+        if minerState ~= minerStates.RETURNING then
+            minerState = minerStates.MINING
+        end
+        mutex:unlock("mineVein")
         return true
     else
-        minerState = minerStates.SEARCHING
+        mutex:lock("mineVein")
+        if minerState ~= minerStates.RETURNING then
+            minerState = minerStates.SEARCHING
+        end
+        mutex:unlock("mineVein")
         return false
     end
 end
 
 local function suckInventory(direction)
+    mutex:lock("suckInventory")
     if betterTurtle:actionInDirection("detect", direction) and betterTurtle:actionInDirection("inspect", direction) then
         while betterTurtle:actionInDirection("suck", direction) do end
         environment:insertCoordToCheckedBlocks(betterTurtle.offsetPosition(direction), blockType.BLOCKER)
-        minerState = minerStates.SEARCHING
+        if minerState ~= minerStates.RETURNING then
+            minerState = minerStates.SEARCHING
+        end
+        mutex:unlock("suckInventory")
         return false
     end
+    mutex:unlock("suckInventory")
 end
 
 function check()
     while true do
-        for k, v in pairs(directions) do
-            local blockExists, blockData = betterTurtle:actionInDirection("inspect", v)
-            local blockType = environment:checkBlock(blockData)
-            if blockExists then
+        local pos
+        for _, v in pairs(directions) do
+            if minerState == minerStates.SEARCHING then
+                local blockExists, blockData = betterTurtle:actionInDirection("inspect", v)
                 local blockPos = betterTurtle:offsetPosition(v)
-                if not environment:isBlockChecked(blockPos) then
-                    if suckLava(v, blockType, blockPos, nLevel) then break end
-                    if mineVein(v, blockType, blockPos, nLevel) then break end
-                    if suckInventory(v) then break end
+                local _blockType, checked = environment:checkBlock(blockPos, blockData)
+                if not checked then
+                    if blockExists then
+                        if suckLava(v, _blockType, blockPos, nLevel) then pos = blockPos end
+                        if mineVein(v, _blockType, blockPos, nLevel) then pos = blockPos end
+                        suckInventory(v)
+                    else
+                        environment:insertCoordToCheckedBlocks(betterTurtle:offsetPosition(v), blockType.AIR)
+                    end
+                end
+            else
+                if minerState == minerStates.MINING or minerState == minerStates.RETURNING then
+                    environment:addPositionToCheckQueue(betterTurtle:offsetPosition(v))
+                elseif minerState == minerStates.FUELING then
+                    environment:storeFuelLocation(betterTurtle:offsetPosition(v))
+                elseif minerState == minerStates.NEEDS_FUEL then
+                    local blockPos = betterTurtle:offsetPosition(v)
+                    suckLava(v, blockType.FUEL, blockPos)
+                    pos = blockPos
                 end
             end
         end
-        if minerState == minerStates.SEARCHING then
+        if minerState == minerStates.FUELING or minerState == minerStates.MINING then
+            mutex:lock("check")
+            betterTurtle:move(pos, true)
+            environment:insertCoordToCheckedBlocks(betterTurtle.position, blockType.AIR)
+            mutex:unlock("check")
+        elseif minerState == minerStates.SEARCHING then
             break
         end
     end
 end
 
 function main()
-    while not stop do
+    while minerState ~= minerStates.STOPPING do
         while minerState ~= minerStates.RETURNING do
             local directions = environment:getClosestMiningPositions(betterTurtle.position)
+            mutex:lock("main")
             for _, v in pairs(directions) do
                 betterTurtle:moveDistance(v)
+            end
+            mutex:unlock("main")
+            if not pcall(check) then
+                if mutex.error_flag then
+                    logger:warn("[main]: Error was forced from another thread")
+                    check()
+                end
             end
         end
         --not ok, return to base
         print( "[main]: Returning to base!" )
         print ("[main]: At relative position: ".. tostring(betterTurtle.position))
-        betterTurtle:moveToPosition({0, 0, 0}, true)
+        local directions = environment:dijkstra(betterTurtle.position, {0, 0, 0})
+        mutex:lock("main")
+        for _, v in pairs(directions) do
+            betterTurtle:moveDistance(v)
+        end
+        mutex:unlock("main")
         print ("[main]: At relative position: ".. tostring(betterTurtle.position))
         print( "[main]: Returned to base!" )
-        betterTurtle:turn(originalDirection)
+        mutex:lock("main")
         for i = 1, 14 do
             betterTurtle.select( i )
             betterTurtle.dropDown()
         end
         betterTurtle.select( 1 )
-        if not inventoryFull and not rangeReached then
-            stop = true
-            print( "[main]: Inventory was not full, something else went wrong" )
-        elseif inventoryFull then
-            ok = true
-            inventoryFull = false
-            print( "[main]: Inventory was full, continuing operation" )
+        mutex:unlock("main")
+        if minerState == minerStates.STOPPING then
+            break
         end
+    end
+
+    for i = 1, 14 do
+        betterTurtle.select( i )
+        betterTurtle.dropDown()
     end
 end
 
 function isOk()
-    while ok do
+    while minerState ~= minerStates.STOPPING do
         local hasSpace = false
+        mutex:lock("isOk")
         for i = 14, 1, -1 do
             if betterTurtle.getItemCount( i ) == 0 then
                 hasSpace = true
                 break
             end
         end
+        betterTurtle.select( 1 )
+        mutex:unlock("isOk")
         local manualInterrupt = false
         --Listen for RedNet manual interrupts
         if rednet.isOpen("left") then
@@ -209,16 +265,36 @@ function isOk()
                 manualInterrupt = true
             end
         end
-        if not hasSpace then
-            print( "[isOk]: Out of space!  Intiating return!" )
-            ok = false
-            inventoryFull = true
+        local needsFuel = betterTurtle.getFuelLevel() < 1000
+        if needsFuel then
+            mutex:lock("isOk")
+            logger:info("[isOk]: Low fuel detected!  Initiating return!")
+            environment:addPositionToCheckQueue(betterTurtle.position)
+            minerState = minerStates.NEEDS_FUEL
+            local directions, shouldContinue = environment:getNearestFuelLocation(betterTurtle.position)
+            if shouldContinue then
+                for _, v in pairs(directions) do
+                    betterTurtle:moveDistance(v)
+                end
+                mutex.error_flag = true
+            else
+                minerState = minerStates.STOPPING
+            end
+            mutex:unlock("isOk")
         end
-        if manualInterrupt then
-            print("[isOk]: Manual return requested!, Returning..")
-            ok = false
+        if not hasSpace or manualInterrupt then
+            mutex:lock("isOk")
+            if not hasSpace then
+                print( "[isOk]: Out of space!  Intiating return!" )
+                minerState = minerStates.RETURNING
+            end
+            if manualInterrupt then
+                print("[isOk]: Manual return requested!, Returning..")
+                minerState = minerStates.STOPPING
+            end
+            mutex:unlock("isOk")
         end
-        if ok then
+        if minerState ~= STOPPING then
             print( "[isOk]: Everything is OK!" )
             local id = os.startTimer( 10 )
             while true do
@@ -232,7 +308,13 @@ function isOk()
 end
 
 parallel.waitForAll( trackTime, isOk, dumpWaste, main )
-for i = 1, 14 do
-    betterTurtle.select( i )
-    betterTurtle.dropDown()
+
+function setTurtle(turtle)
+    logger:error("This should only be used in a unit testing environment")
+    betterTurtle = turtle
+end
+
+function resetTurtle()
+    logger:error("This should only be used in a unit testing environment")
+    betterTurtle = oldTurtle
 end

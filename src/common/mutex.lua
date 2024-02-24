@@ -12,7 +12,8 @@ Mutex = {
     timeout = 6,
     queue = {},
     owner = nil,
-    lock_count = 0
+    lock_count = 0,
+    error_flag = false
 }
 
 function Mutex:new(timeout)
@@ -30,6 +31,9 @@ function Mutex:lock(func)
     end
     table.insert(self.queue, thread)
     while self.func ~= nil or self.queue[1] ~= thread do
+        if self.error_flag then
+            error("Error was forced from another thread")
+        end
         if coroutine.status(thread) == "dead" then
             return false
         end

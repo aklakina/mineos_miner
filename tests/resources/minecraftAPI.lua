@@ -68,7 +68,42 @@ turtle = {
         table.insert(minecraftAPI_callHistory, "turtle.attack")
         turtle.entityHp = turtle.entityHp - 1
         return turtle.entityHp > 0
-    end
+    end,
+    getFuelLevel = function()
+        logger:debug("getFuelLevel function called")
+        table.insert(minecraftAPI_callHistory, "turtle.getFuelLevel")
+        return 500
+    end,
+    refuel = function()
+        logger:debug("refuel function called")
+        table.insert(minecraftAPI_callHistory, "turtle.refuel")
+        return true
+    end,
+    select = function(slot)
+        logger:debug("select function called")
+        table.insert(minecraftAPI_callHistory, "turtle.select")
+        return true
+    end,
+    place = function()
+        logger:debug("place function called")
+        table.insert(minecraftAPI_callHistory, "turtle.place")
+        return true
+    end,
+    getItemCount = function()
+        logger:debug("getItemCount function called")
+        table.insert(minecraftAPI_callHistory, "turtle.getItemCount")
+        return 1
+    end,
+    getItemDetail = function()
+        logger:debug("getItemDetail function called")
+        table.insert(minecraftAPI_callHistory, "turtle.getItemDetail")
+        return {name = "minecraft:cobblestone"}
+    end,
+    drop = function()
+        logger:debug("drop function called")
+        table.insert(minecraftAPI_callHistory, "turtle.drop")
+        return true
+    end,
 }
 
 function turtle.reset()
@@ -85,3 +120,7 @@ function turtle.printCallHistory()
     end
     logger:debug("Finished printing call history")
 end
+
+parallel = {
+    waitForAll = function() end
+}

@@ -13,13 +13,13 @@ local logger = Logger:new(Logger.levels.DEBUG, "Environment")
 require('binaryHeap')
 
 blockType = {
-    WASTE = {},
-    FUEL = {},
-    OTHER = {},
-    BLOCKER = {},
-    AIR = {},
-    UNKNOWN = {},
-    PATH = {}
+    WASTE = {name = "Waste"},
+    FUEL = {name = "Fuel"},
+    OTHER = {name = "Other"},
+    BLOCKER = {name = "Blocker"},
+    AIR = {name = "Air"},
+    UNKNOWN = {name = "Unkown"},
+    PATH = {name = "Path"}
 }
 
 Environment = {
@@ -41,6 +41,7 @@ function Environment:getBlockAtPosition(coordinate)
         local blockType = self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]
         return blockType
     elseif path then
+        self:insertCoordToCheckedBlocks(coordinate, blockType.PATH)
         return blockType.PATH
     else
         return blockType.UNKNOWN
@@ -67,7 +68,7 @@ local function loadWasteBlocks()
     local file = io.open("wasteBlocks", "r")
     local line = file:read()
     while line do
-        table.insert(Environment.wasteBlocks, line)
+        Environment.wasteBlocks[line] = true
         line = file:read()
     end
     file:close()
@@ -80,7 +81,7 @@ local function loadFuels()
     local file = io.open("fuels", "r")
     local line = file:read()
     while line do
-        table.insert(Environment.fuels, line)
+        Environment.fuels[line] = true
         line = file:read()
     end
     file:close()
@@ -92,7 +93,7 @@ local function loadBlockers()
     local file = io.open("blockers", "r")
     local line = file:read()
     while line do
-        table.insert(Environment.blockers, line)
+        Environment.blockers[line] = true
         line = file:read()
     end
     file:close()
@@ -132,40 +133,24 @@ function Environment:new()
             o[k] = {}
         end
     end
+    o.wasteBlocks = Environment.wasteBlocks
+    o.blockers = Environment.blockers
+    o.fuels = Environment.fuels
+    o.miningMap = Environment.miningMap
     setmetatable(o, self)
     self.__index = self
     return o
 end
 
---[[
-    Checks if a block has been checked and if it is a waste block
-    If the block is a waste block, if it is then return true
-    If the block is not a waste block, then return false
-
-    @param x - the x coordinate of the block
-    @param y - the y coordinate of the block
-    @param z - the z coordinate of the block
-    @param blockType - the metadata of block on position (x, y, z)
-]]--
-function Environment:isBlockChecked(coordinate)
-    logger:debug("Checking if block at coordinate " .. tostring(coordinate) .. " has been checked")
-    if getmetatable(coordinate) ~= Coordinate then
-        coordinate = Coordinate.parse(coordinate)
-    end
-    local result = (self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]) or false
-    logger:debug("Block at coordinate " .. tostring(coordinate) .. " has been checked: " .. tostring(result))
-    return result
-end
-
 function Environment:insertCoordToCheckedBlocks(coordinate, blockType)
-    logger:debug("Inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
+    logger:trace("Inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
     self.checkedBlocks[coordinate.y] = self.checkedBlocks[coordinate.y] or {}
     self.checkedBlocks[coordinate.y][coordinate.x] = self.checkedBlocks[coordinate.y][coordinate.x] or {}
     self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] = blockType
-    logger:debug("Finished inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
+    logger:trace("Finished inserting coordinate " .. tostring(coordinate) .. " to checked blocks")
 end
 
 Environment:insertCoordToCheckedBlocks(Coordinate:new(0, 0, 0), blockType.AIR)
@@ -183,6 +168,10 @@ function Environment:checkBlockType(block_type)
         logger:debug("Block type for " .. tostring(block_type) .. " is FUEL")
         return blockType.FUEL
     end
+    if self.blockers[block_type] then
+        logger:debug("Block type for " .. tostring(block_type) .. " if Blocker")
+        return blockType.BLOCKER
+    end
     logger:debug("Block type for " .. tostring(block_type) .. " is OTHER")
     return blockType.OTHER
 end
@@ -192,18 +181,24 @@ function Environment:checkBlock(coordinate, block_type)
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
-    if self:isBlockChecked(coordinate) then
-        logger:debug("Block at coordinate " .. tostring(coordinate) .. " is a waste block")
-        return blockType.WASTE
+    local typeInMap = self:getBlockAtPosition(coordinate)
+    local _blockType = self:checkBlockType(block_type)
+    if typeInMap ~= blockType.UNKNOWN then
+        if _blockType == typeInMap then
+            logger:debug("Block at coordinate " .. tostring(coordinate) .. " is already checked")
+            return _blockType, true
+        elseif _blockType ~= typeInMap then
+            logger:warn("New block type for already registered block")
+            logger:debug("At " .. tostring(coordinate) .. " new block type: " .. _blockType.name)
+            self:insertCoordToCheckedBlocks(coordinate, _blockType)
+            return _blockType, false
+        end
+    else
+        logger:debug("New block data at " .. tostring(coordinate) .. " with type " .. _blockType.name)
+        self:insertCoordToCheckedBlocks(coordinate, _blockType)
+        return _blockType, false
     end
-    local blockType = self:checkBlockType(block_type)
-    self:insertCoordToCheckedBlocks(coordinate, blockType)
-    if block_type then
-        logger:debug("Block at coordinate " .. tostring(coordinate) .. " is of type " .. tostring(blockType))
-        return blockType
-    end
-    logger:debug("Block at coordinate " .. tostring(coordinate) .. " is of unknown type")
-    return blockType.UNKNOWN
+
 end
 
 function Environment:storeFuelLocation(coordinate)
@@ -213,8 +208,34 @@ function Environment:storeFuelLocation(coordinate)
     end
     self.fuelLocations[coordinate.y] = self.fuelLocations[coordinate.y] or {}
     self.fuelLocations[coordinate.y][coordinate.x] = self.fuelLocations[coordinate.y][coordinate.x] or {}
-    self.fuelLocations[coordinate.y][coordinate.x][coordinate.z] = true
+    self.fuelLocations[coordinate.y][coordinate.x][coordinate.z] = blockType.FUEL
     logger:debug("Finished storing fuel location at coordinate " .. tostring(coordinate))
+end
+
+function Environment:getNearestFuelLocation(source)
+    local fuelLocations = {}
+    for y, v1 in pairs(self.fuelLocations) do
+        for x, v2 in pairs(v1) do
+            for z, _ in pairs(v2) do
+                table.insert(fuelLocations, Coordinate:new(x, y, z))
+            end
+        end
+    end
+    if #fuelLocations == 0 then
+        return nil, false
+    end
+    local path, target = self:dijkstra(source, fuelLocations)
+    fuelLocations[target.y][target.x][target.z] = nil
+    return path, true
+end
+
+function Environment:removeFuelLocation(coordinate)
+    if getmetatable(coordinate) ~= Coordinate then
+        coordinate = Coordinate.parse(coordinate)
+    end
+    if self.fuelLocations[coordinate.y] and self.fuelLocations[coordinate.y][coordinate.x] then
+        self.fuelLocations[coordinate.y][coordinate.x][coordinate.z] = nil
+    end
 end
 
 function Environment:addPositionToCheckQueue(coordinate)

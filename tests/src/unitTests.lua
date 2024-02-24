@@ -6,6 +6,10 @@
 -- Importing the necessary libraries for testing
 local lu = require('luaunit')
 
+-- Importing the Logger module
+require('Logger')
+local logger = Logger:new(Logger.levels.TRACE, "unitTests")
+
 require('coordinate')
 
 TestCoordinate = {}
@@ -222,27 +226,20 @@ require('environment')
 
 TestEnvironment = {}
 
-function TestEnvironment:testIsBlockCheckedWithCheckedBlock()
-    local environment = Environment:new()
-    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
-    environment:insertCoordToCheckedBlocks(coordinate)
-    lu.assertNotEquals(environment:isBlockChecked(coordinate), nil)
-end
-
-function TestEnvironment:testIsBlockCheckedWithUncheckedBlock()
-    local environment = Environment:new()
-    local coordinate = Coordinate:new(1, 2, 3, directions.forward)
-    lu.assertFalse(environment:isBlockChecked(coordinate))
-end
-
 function TestEnvironment:testCheckBlockTypeWithWasteBlock()
     local environment = Environment:new()
-    lu.assertEquals(environment:checkBlockType("waste"), blockType.WASTE)
+    for k, v in pairs(environment.wasteBlocks) do
+        logger:debug(k)
+    end
+    for k, v in pairs(environment.fuels) do
+        logger:debug(k)
+    end
+    lu.assertEquals(environment:checkBlockType("minecraft:stone"), blockType.WASTE)
 end
 
 function TestEnvironment:testCheckBlockTypeWithFuelBlock()
     local environment = Environment:new()
-    lu.assertEquals(environment:checkBlockType("fuel"), blockType.FUEL)
+    lu.assertEquals(environment:checkBlockType("minecraft:lava"), blockType.FUEL)
 end
 
 function TestEnvironment:testCheckBlockTypeWithOtherBlock()
@@ -254,20 +251,20 @@ function TestEnvironment:testCheckBlockWithCheckedBlock()
     local environment = Environment:new()
     local coordinate = Coordinate:new(1, 2, 3, directions.forward)
     environment:insertCoordToCheckedBlocks(coordinate)
-    lu.assertEquals(environment:checkBlock(coordinate, "waste"), blockType.WASTE)
+    lu.assertEquals(environment:checkBlock(coordinate, "minecraft:stone"), blockType.WASTE)
 end
 
 function TestEnvironment:testCheckBlockWithUncheckedBlock()
     local environment = Environment:new()
     local coordinate = Coordinate:new(1, 2, 3, directions.forward)
-    lu.assertEquals(environment:checkBlock(coordinate, "fuel"), blockType.FUEL)
+    lu.assertEquals(environment:checkBlock(coordinate, "minecraft:lava"), blockType.FUEL)
 end
 
 function TestEnvironment:testStoreFuelLocation()
     local environment = Environment:new()
     local coordinate = Coordinate:new(1, 2, 3, directions.forward)
     environment:storeFuelLocation(coordinate)
-    lu.assertTrue(environment.fuelLocations[coordinate.y][coordinate.x][coordinate.z])
+    lu.assertEquals(environment.fuelLocations[coordinate.y][coordinate.x][coordinate.z], blockType.FUEL)
 end
 
 require('minecraftAPI') -- Assuming a mock turtle module is available
@@ -490,6 +487,99 @@ function TestEnvironment:testDijkstraWithPopulatedCheckedBlocks()
     lu.assertEvalToTrue(path[1]:isEqual({0, 0, 3}))
     lu.assertEvalToTrue(path[2]:isEqual({3, 0, 0}))
     lu.assertEvalToTrue(path[3]:isEqual({0, 3, 0}))
+end
+
+require('MinerCore')
+
+TestMinerCore = {}
+
+function TestMinerCore:setUp()
+    logger:info("Setup completed for a new test")
+end
+
+function TestMinerCore:testLoadConfigWithValidFile()
+    local file = io.open("config.ini", "w")
+    file:write("key1 = value1\n")
+    file:write("key2 = value2\n")
+    file:close()
+
+    local config = loadConfig()
+
+    lu.assertEquals(config["key1"], "value1")
+    lu.assertEquals(config["key2"], "value2")
+end
+
+function TestMinerCore:testLoadConfigWithEmptyFile()
+    local file = io.open("config.ini", "w")
+    file:close()
+
+    local config = loadConfig()
+
+    lu.assertEquals(config, {})
+end
+
+function TestMinerCore:testDumpWasteWithWasteInInventory()
+    turtle.getItemCount = function(slot) return 1 end
+    turtle.getItemDetail = function(slot) return {name = "minecraft:stone"} end
+    local betterTurtle = BetterTurtle:new()
+    setTurtle(betterTurtle)
+    lu.assertEquals(dumpWaste(), 14)
+    resetTurtle()
+end
+
+function TestMinerCore:testDumpWasteWithNoWasteInInventory()
+    turtle.getItemCount = function(slot) return 1 end
+    turtle.getItemDetail = function(slot) return "other" end
+    local betterTurtle = BetterTurtle:new()
+    setTurtle(betterTurtle)
+    lu.assertEquals(dumpWaste(), 0)
+    resetTurtle()
+end
+
+function TestMinerCore:testSuckLavaWithFuelBlockAndLowFuelLevel()
+    turtle.getFuelLevel = function() return 500 end
+
+    local result = suckLava("forward", blockType.FUEL, Coordinate:new(1, 2, 3))
+
+    lu.assertTrue(result)
+    lu.assertEquals(minerState, minerStates.FUELING)
+end
+
+function TestMinerCore:testSuckLavaWithFuelBlockAndHighFuelLevel()
+    turtle.getFuelLevel = function() return 95000 end
+    turtle.actionInDirection = function(action, direction) return true end
+    turtle.refuel = function() return true end
+    local betterTurtle = BetterTurtle:new()
+    setTurtle(betterTurtle)
+    local result = suckLava("forward", blockType.FUEL, Coordinate:new(1, 2, 3))
+    resetTurtle()
+    lu.assertFalse(result)
+    lu.assertEquals(minerState, minerStates.SEARCHING)
+end
+
+function TestMinerCore:testSuckLavaWithNonFuelBlock()
+    turtle.getFuelLevel = function() return 500 end
+    turtle.actionInDirection = function(action, direction) return true end
+    turtle.refuel = function() return true end
+
+    local result = suckLava("forward", blockType.WASTE, Coordinate:new(1, 2, 3))
+
+    lu.assertFalse(result)
+    lu.assertEquals(minerState, minerStates.SEARCHING)
+end
+
+function TestMinerCore:testMineVeinWithOtherBlock()
+    local result = mineVein(blockType.OTHER)
+
+    lu.assertTrue(result)
+    lu.assertEquals(minerState, minerStates.MINING)
+end
+
+function TestMinerCore:testMineVeinWithNonOtherBlock()
+    local result = mineVein(blockType.WASTE)
+
+    lu.assertFalse(result)
+    lu.assertEquals(minerState, minerStates.SEARCHING)
 end
 
 os.exit(lu.LuaUnit.run())
