@@ -60,10 +60,10 @@ jobs:
       - name: Setup Lua with Luver
         uses: MunifTanjim/luver-action@v1.2.1
         with:
-        # Lua version to set as default.
-        default: 5.4.6
-        # Lua versions to install.
-        lua_versions: 5.4.6
+          # Lua version to set as default.
+          default: 5.4.6
+          # Lua versions to install.
+          lua_versions: 5.4.6
 
       - name: Run the compile script
         run: ./compile.sh
