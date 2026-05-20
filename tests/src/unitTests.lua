@@ -582,4 +582,208 @@ function TestMinerCore:testMineVeinWithNonOtherBlock()
     lu.assertEquals(minerState, minerStates.SEARCHING)
 end
 
+-- ---------------------------------------------------------------------------
+-- New tests for the post-rewrite features.
+-- ---------------------------------------------------------------------------
+
+TestCoordinateHash = {}
+function TestCoordinateHash:testHashUniqueWithinRange()
+    local seen = {}
+    for x = -3, 3 do
+        for y = -2, 2 do
+            for z = -3, 3 do
+                local h = Coordinate:new(x, y, z):hash()
+                lu.assertNil(seen[h], "Hash collision at (" .. x .. "," .. y .. "," .. z .. ")")
+                seen[h] = true
+            end
+        end
+    end
+end
+
+function TestCoordinateHash:testHashStableAcrossInstances()
+    local c1 = Coordinate:new(5, -2, 11)
+    local c2 = Coordinate:new(5, -2, 11)
+    lu.assertEquals(c1:hash(), c2:hash())
+end
+
+TestDirectionNumbering = {}
+function TestDirectionNumbering:testCardinalsHave0to3()
+    lu.assertEquals(directions.forward.num, 0)
+    lu.assertEquals(directions.right.num,   1)
+    lu.assertEquals(directions.back.num,    2)
+    lu.assertEquals(directions.left.num,    3)
+end
+
+function TestDirectionNumbering:testVerticalNotCardinal()
+    lu.assertFalse(directions.isCardinal(directions.up))
+    lu.assertFalse(directions.isCardinal(directions.down))
+    lu.assertTrue(directions.isCardinal(directions.forward))
+    lu.assertTrue(directions.isVertical(directions.up))
+    lu.assertTrue(directions.isVertical(directions.down))
+end
+
+function TestDirectionNumbering:testAllListSize()
+    lu.assertEquals(#directions.all, 6)
+    lu.assertEquals(#directions.cardinal, 4)
+    lu.assertEquals(#directions.vertical, 2)
+end
+
+-- BetterTurtle:move - all 6 relative directions across all 4 facings, plus
+-- absolute directions. This is the test that would have caught the
+-- num=0-collision bug from earlier.
+require('betterTurtle')
+require('minecraftAPI')   -- mock turtle/global
+
+TestBetterTurtleMovement = {}
+function TestBetterTurtleMovement:setUp()
+    if turtle and turtle.reset then turtle.reset() end
+    self.t = BetterTurtle:new()
+end
+
+function TestBetterTurtleMovement:testForwardFromFacingForward()
+    lu.assertTrue(self.t:move(directions.forward, false, true))
+    lu.assertEquals(self.t.position.z, 1)
+    lu.assertEquals(self.t.position.x, 0)
+    lu.assertEquals(self.t.position.y, 0)
+end
+
+function TestBetterTurtleMovement:testUpUpdatesY()
+    self.t:move(directions.up, false, true)
+    lu.assertEquals(self.t.position.y, 1)
+    lu.assertEquals(self.t.position.x, 0)
+    lu.assertEquals(self.t.position.z, 0)
+end
+
+function TestBetterTurtleMovement:testDownUpdatesY()
+    self.t:move(directions.down, false, true)
+    lu.assertEquals(self.t.position.y, -1)
+end
+
+function TestBetterTurtleMovement:testBackFromFacingForward()
+    self.t:move(directions.back, false, true)
+    lu.assertEquals(self.t.position.z, -1)
+end
+
+function TestBetterTurtleMovement:testRelativeForwardFollowsFacing()
+    self.t:turn(directions.right)            -- now facing +x
+    self.t:move(directions.forward, false, true)
+    lu.assertEquals(self.t.position.x, 1)
+    lu.assertEquals(self.t.position.z, 0)
+end
+
+function TestBetterTurtleMovement:testTurnRefusesUpDown()
+    local rot = self.t:turn(directions.up)
+    lu.assertEquals(rot, 0)
+    lu.assertEquals(self.t.direction, directions.forward) -- unchanged
+end
+
+function TestBetterTurtleMovement:testInstancesIndependent()
+    local t2 = BetterTurtle:new()
+    self.t:move(directions.up, false, true)
+    lu.assertEquals(t2.position.y, 0)        -- t2 not affected
+    lu.assertEquals(self.t.position.y, 1)
+end
+
+-- Environment & Dijkstra
+require('environment')
+
+TestEnvironmentPatterns = {}
+function TestEnvironmentPatterns:testBranchPattern()
+    Environment.currentPattern = "branch"
+    local e = Environment:new()
+    lu.assertTrue(e:isMiningTarget(Coordinate:new(0, 0, 0)))
+    lu.assertTrue(e:isMiningTarget(Coordinate:new(3, 0, 0)))
+    lu.assertFalse(e:isMiningTarget(Coordinate:new(1, 0, 1)))
+    lu.assertFalse(e:isMiningTarget(Coordinate:new(0, 1, 0))) -- wrong y
+end
+
+function TestEnvironmentPatterns:testQuarryPattern()
+    Environment.currentPattern = "quarry"
+    local e = Environment:new()
+    lu.assertTrue(e:isMiningTarget(Coordinate:new(7, -3, 9)))
+    lu.assertFalse(e:isMiningTarget(Coordinate:new(0, 1, 0)))
+    Environment.currentPattern = "branch"  -- restore
+end
+
+TestEnvironmentState = {}
+function TestEnvironmentState:testRoundTrip()
+    Environment.currentPattern = "branch"
+    local e = Environment:new()
+    e:insertCoordToCheckedBlocks(Coordinate:new(2, 0, 3), blockType.AIR)
+    e:insertCoordToCheckedBlocks(Coordinate:new(2, 0, 4), blockType.OTHER)
+    e:storeFuelLocation(Coordinate:new(5, 0, 5))
+    local state = e:toState()
+    local e2 = Environment:new()
+    e2:loadState(state)
+    lu.assertEquals(e2:getBlockAtPosition(Coordinate:new(2, 0, 3)), blockType.AIR)
+    lu.assertEquals(e2:getBlockAtPosition(Coordinate:new(2, 0, 4)), blockType.OTHER)
+end
+
+TestEnvironmentPrune = {}
+function TestEnvironmentPrune:testPruneFarBlocks()
+    local e = Environment:new()
+    e:insertCoordToCheckedBlocks(Coordinate:new(0, 0, 0), blockType.AIR)
+    e:insertCoordToCheckedBlocks(Coordinate:new(200, 0, 0), blockType.AIR)
+    e:prune(Coordinate:new(0, 0, 0), 50)
+    lu.assertEquals(e:getBlockAtPosition(Coordinate:new(0, 0, 0)), blockType.AIR)
+    lu.assertEquals(e:getBlockAtPosition(Coordinate:new(200, 0, 0)), blockType.UNKNOWN)
+end
+
+-- FSM
+require('fsm')
+
+TestFSM = {}
+function TestFSM:setUp()
+    self.A, self.B, self.C = {name="A"}, {name="B"}, {name="C"}
+    self.fsm = FSM:new(self.A, {
+        [self.A] = { [self.B] = true },
+        [self.B] = { [self.C] = true },
+        [self.C] = { [self.A] = true },
+    })
+end
+
+function TestFSM:testLegalTransition()
+    self.fsm:set(self.B)
+    lu.assertTrue(self.fsm:is(self.B))
+end
+
+function TestFSM:testIllegalTransitionErrors()
+    lu.assertErrorMsgContains("Illegal transition", function() self.fsm:set(self.C) end)
+end
+
+function TestFSM:testForceBypassesGuards()
+    self.fsm:force(self.C)
+    lu.assertTrue(self.fsm:is(self.C))
+end
+
+function TestFSM:testOnChangeCallback()
+    local last
+    self.fsm:onChange(function(prev, next) last = next end)
+    self.fsm:set(self.B)
+    lu.assertEquals(last, self.B)
+end
+
+function TestFSM:testIsAny()
+    lu.assertTrue(self.fsm:isAny(self.A, self.B))
+    lu.assertFalse(self.fsm:isAny(self.B, self.C))
+end
+
+-- Persistence
+require('persistence')
+TestPersistence = {}
+function TestPersistence:testRoundTrip()
+    if type(fs) ~= "table" then return end -- skip when no fs mock
+    local data = { a = 1, b = "hello", c = { 1, 2, 3 } }
+    Persistence.save("test_state.dat", data)
+    local back = Persistence.load("test_state.dat")
+    lu.assertEquals(back.a, 1)
+    lu.assertEquals(back.b, "hello")
+    lu.assertEquals(back.c[2], 2)
+    Persistence.delete("test_state.dat")
+end
+
+function TestPersistence:testLoadMissingReturnsNil()
+    lu.assertNil(Persistence.load("nonexistent_file.xyz"))
+end
+
 os.exit(lu.LuaUnit.run())

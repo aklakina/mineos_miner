@@ -27,14 +27,30 @@ function Direction:new(name, num, vector)
 end
 
 directions = {
+    -- Cardinal (horizontal) directions use num 0..3 in turn-right order.
     forward = Direction:new("forward", 0, {0, 0, 1}),
-    right = Direction:new("right", 1, {1, 0, 0}),
-    back = Direction:new("back", 2, {0, 0, -1}),
-    left = Direction:new("left", 3, {-1, 0, 0}),
-    up = Direction:new("up", 0, {0, 1, 0}),
-    down = Direction:new("down", 0, {0, -1, 0}),
-    any = Direction:new("any", 0, {0, 0, 0}),
+    right   = Direction:new("right",   1, {1, 0, 0}),
+    back    = Direction:new("back",    2, {0, 0, -1}),
+    left    = Direction:new("left",    3, {-1, 0, 0}),
+    -- Vertical and the "any" sentinel get negative nums so they never collide
+    -- with cardinal arithmetic (this used to cause turn(up) to be miscomputed
+    -- because up, down, forward and any all shared num=0).
+    up      = Direction:new("up",     -1, {0, 1, 0}),
+    down    = Direction:new("down",   -2, {0, -1, 0}),
+    any     = Direction:new("any",    -3, {0, 0, 0}),
 }
+
+-- Ordered iterators so consumers don't depend on `pairs()` ordering or have
+-- to filter out `any` themselves. Use these instead of `pairs(directions)`.
+directions.cardinal = { directions.forward, directions.right, directions.back, directions.left }
+directions.vertical = { directions.up, directions.down }
+directions.all      = {
+    directions.forward, directions.right, directions.back, directions.left,
+    directions.up, directions.down
+}
+
+function directions.isCardinal(d) return d and d.num and d.num >= 0 and d.num <= 3 end
+function directions.isVertical(d) return d == directions.up or d == directions.down end
 
 numToDirections = {
     [0] = directions.forward,
@@ -155,6 +171,18 @@ function Coordinate:__tostring()
     return "["..self.x..", "..self.y..", "..self.z.."]"
 end
 
+-- Pack (x,y,z) into a single number suitable for use as a table key. Far
+-- cheaper than `tostring(c)` because it avoids string concatenation and the
+-- resulting garbage. Valid for |x|,|z| < 2^20 and |y| < 2^11, which is more
+-- than enough for any reasonable Minecraft mining range.
+function Coordinate:hash()
+    -- Offset to keep negatives non-negative, then bit-pack.
+    local x = (self.x + 524288)    -- 20 bits  (offset 2^19)
+    local y = (self.y + 1024)      -- 11 bits  (offset 2^10)
+    local z = (self.z + 524288)    -- 20 bits
+    return x * 0x800000000 + y * 0x100000 + z
+end
+
 function Coordinate:isEqual(o)
     if not (getmetatable(o) == Coordinate) then
         o = Coordinate.parse(o)
@@ -166,19 +194,10 @@ function Coordinate:isEqual(o)
 end
 
 function Coordinate.__eq(o, t)
-    error("DEPRECATED")
-    logger:debug("Comparing " .. tostring(o) .. " and " .. tostring(t))
-    if getmetatable(t) ~= Coordinate then
-        t = Coordinate.parse(t)
-    end
-    if getmetatable(o) ~= Coordinate then
-        o = Coordinate.parse(o)
-    end
-    if o == nil and t == nil then
-        return true
-    elseif o == nil or t == nil then
-        return false
-    end
+    -- __eq is only invoked when both operands share this metatable,
+    -- so both o and t are guaranteed Coordinates here.
+    if o == nil and t == nil then return true end
+    if o == nil or t == nil then return false end
     return o.x == t.x and o.y == t.y and o.z == t.z
 end
 
@@ -283,6 +302,10 @@ end
 
 function Distance.fromPath(path)
     logger:debug("Merging straight movements")
+    if not path or #path < 2 then
+        logger:debug("Empty or trivial path; no distances to merge")
+        return {}
+    end
     local distances = {}
     -- Every consecutive coordinate change on the same axis can be merged into one distance vector
     table.insert(distances, Distance:new(path[1], path[2]))

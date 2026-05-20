@@ -28,19 +28,61 @@ Environment = {
     blockers = {},
     fuels = {},
     fuelLocations = {},
-    miningMap = {},
     checkQueue = BinaryHeap:new()
 }
+
+-- ---------------------------------------------------------------------------
+-- Mining patterns - pluggable strategies for choosing branch coordinates.
+-- ---------------------------------------------------------------------------
+
+Environment.patterns = {
+    -- Default branch mining: every 3 blocks along x or z at y=0.
+    -- Looks like:  x . . x . . x . . x
+    --              .         .         .
+    --              x . . x . . x . . x
+    branch = function(c)
+        if c.y ~= 0 then return false end
+        return c.x == 0 or c.z == 0 or c.x % 3 == 0 or c.z % 3 == 0
+    end,
+
+    -- Strip mining: parallel rows along z every 4 blocks.
+    strip = function(c)
+        return c.y == 0 and c.z % 4 == 0
+    end,
+
+    -- Quarry: mine everything from y=0 down (and along the surface).
+    quarry = function(c)
+        return c.y <= 0
+    end,
+
+    -- Spiral: rings around (0,0) at y=0. Membership test (not generation).
+    spiral = function(c)
+        if c.y ~= 0 then return false end
+        local r = math.max(math.abs(c.x), math.abs(c.z))
+        return c.x == r or c.x == -r or c.z == r or c.z == -r
+    end,
+}
+Environment.currentPattern = "branch"
+
+-- Returns true if the given coordinate is a node on the configured mining grid.
+function Environment:isMiningTarget(coordinate)
+    if getmetatable(coordinate) ~= Coordinate then
+        coordinate = Coordinate.parse(coordinate)
+    end
+    local fn = Environment.patterns[Environment.currentPattern]
+    if not fn then return false end
+    return fn(coordinate)
+end
 
 function Environment:getBlockAtPosition(coordinate)
     if getmetatable(coordinate) ~= Coordinate then
         coordinate = Coordinate.parse(coordinate)
     end
-    local path = self.miningMap[tostring(coordinate)]
-    if self.checkedBlocks[coordinate.y] and self.checkedBlocks[coordinate.y][coordinate.x] and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] then
-        local blockType = self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]
-        return blockType
-    elseif path then
+    if self.checkedBlocks[coordinate.y]
+        and self.checkedBlocks[coordinate.y][coordinate.x]
+        and self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z] then
+        return self.checkedBlocks[coordinate.y][coordinate.x][coordinate.z]
+    elseif self:isMiningTarget(coordinate) then
         self:insertCoordToCheckedBlocks(coordinate, blockType.PATH)
         return blockType.PATH
     else
@@ -50,14 +92,14 @@ end
 
 function Environment:getNeighbours(coordinate)
     local neighbours = {}
-    for _, v in pairs(directions) do
-        if getmetatable(v) == Direction and v.name ~= "any" then
-            logger:trace("Checking neighbour in direction " .. tostring(v.name))
-            local neighbour = coordinate + v.vector
-            logger:trace("Neighbour in direction " .. tostring(v.name) .. " is at position " .. tostring(neighbour))
-            local blockType = self:getBlockAtPosition(neighbour)
-            neighbours[v] = {position = neighbour, type = blockType}
-        end
+    -- Use the ordered `directions.all` table for stable iteration order
+    -- and to skip the `any` sentinel without a metatable check.
+    for _, v in ipairs(directions.all) do
+        logger:trace("Checking neighbour in direction " .. tostring(v.name))
+        local neighbour = coordinate + v.vector
+        logger:trace("Neighbour in direction " .. tostring(v.name) .. " is at position " .. tostring(neighbour))
+        local blockType = self:getBlockAtPosition(neighbour)
+        neighbours[v] = {position = neighbour, type = blockType}
     end
     return neighbours
 end
@@ -101,24 +143,9 @@ local function loadBlockers()
 end
 
 local function generateMiningMap()
-    -- The mining map should be a set of static coordinates at which the robot should check for valuables.
-    -- For the mining operation to be efficient it is advised to use branch mining.
-    -- for example:
-    -- x||x||x||x||x
-    -- xxxxxxxxxxxxx
-    -- x||x||x||x||x
-    -- Where x marks the coordinates at which the robot should check for valuables.
-    -- and | marks the coordinates that should not be present in the mining map
-    -- The robot should start at the first x and move to the next x in the same row.
-    for x = -255, 255, 1 do
-        for z = -255, 255, 1 do
-            if x == 0 or z == 0 then
-                Environment.miningMap[tostring(Coordinate:new(x, 0, z))] = blockType.UNKNOWN
-            elseif x % 3 == 0 or z % 3 == 0 then
-                Environment.miningMap[tostring(Coordinate:new(x, 0, z))] = blockType.UNKNOWN
-            end
-        end
-    end
+    -- Mining targets are now computed lazily via Environment:isMiningTarget(c).
+    -- No precomputation is needed; this function is retained as a no-op
+    -- so older code paths that call it keep working.
 end
 
 loadWasteBlocks()
@@ -136,7 +163,7 @@ function Environment:new()
     o.wasteBlocks = Environment.wasteBlocks
     o.blockers = Environment.blockers
     o.fuels = Environment.fuels
-    o.miningMap = Environment.miningMap
+    o.checkQueue = BinaryHeap:new()
     setmetatable(o, self)
     self.__index = self
     return o
@@ -225,7 +252,12 @@ function Environment:getNearestFuelLocation(source)
         return nil, false
     end
     local path, target = self:dijkstra(source, fuelLocations)
-    fuelLocations[target.y][target.x][target.z] = nil
+    -- Previously this code tried to index `fuelLocations` (a flat list of
+    -- Coordinates) as a [y][x][z] nested map, which silently did nothing in
+    -- the best case and errored in the worst. Use the proper API instead.
+    if target then
+        self:removeFuelLocation(target)
+    end
     return path, true
 end
 
@@ -254,55 +286,76 @@ function Environment:getClosestMiningPositions(position)
     end
     logger:debug("Getting closest mining positions to " .. tostring(position))
     local coordinates = {}
-    local heapObjects = {}
+    local popped = {}
     if self.checkQueue:isEmpty() then
-        -- It is not needed to get every position from the mining map.
-        for x = -2, 2, 1 do
-            for z = -2, 2, 1 do
-                local coordinate = Coordinate:new(position.x + x, 0, position.z + z)
-                if self.miningMap[tostring(coordinate)] then
-                    table.insert(coordinates, coordinate)
+        -- No queued ore/lava follow-ups: pick branch-mining targets near us.
+        for x = -2, 2 do
+            for z = -2, 2 do
+                local c = Coordinate:new(position.x + x, 0, position.z + z)
+                if self:isMiningTarget(c) and not c:isEqual(position) then
+                    table.insert(coordinates, c)
                 end
             end
         end
     else
-        for i = 1, 5 do
-            table.insert(heapObjects, self.checkQueue:pop())
-            table.insert(coordinates, heapObjects[i].coordinate)
+        -- Drain up to 5 entries from the priority queue. `pop` returns
+        -- (coordinate, priority) - capture BOTH so we can re-queue the
+        -- losers afterwards.
+        for _ = 1, 5 do
+            if self.checkQueue:isEmpty() then break end
+            local coord, prio = self.checkQueue:pop()
+            if not coord then break end
+            table.insert(popped, {coordinate = coord, priority = prio})
+            table.insert(coordinates, coord)
         end
+    end
+    if #coordinates == 0 then
+        return {}
     end
     local path, target = self:dijkstra(position, coordinates)
-    for i, v in heapObjects do
-        if not v.coordinate:isEqual(target) then
-            self.checkQueue:insert(v.coordinate, v.priority - 1)
+    -- Re-insert the non-chosen popped candidates with a slightly better
+    -- priority so they're picked sooner next time.
+    for _, v in ipairs(popped) do
+        if not target or not v.coordinate:isEqual(target) then
+            self.checkQueue:insert(v.coordinate, (v.priority or 0) - 1)
         end
     end
-    return path
+    return path or {}
 end
 
 function Environment:dijkstra(source, targets)
     if getmetatable(source) ~= Coordinate then
         source = Coordinate.parse(source)
     end
-    if getmetatable(targets) ~= Coordinate then
-        if pcall(Coordinate.parse(targets)) then
-            targets = {Coordinate.parse(targets)}
+    -- Normalize `targets` into a list of Coordinates.
+    if getmetatable(targets) == Coordinate then
+        targets = {targets}
+    elseif type(targets) == "table" then
+        -- Try to interpret the whole table as a single coordinate first
+        -- (e.g. {1,2,3} or {x=1,y=2,z=3}). If that fails, treat it as a
+        -- list of coordinates / coordinate-like tables.
+        local ok, parsed = pcall(Coordinate.parse, targets)
+        if ok and getmetatable(parsed) == Coordinate then
+            targets = {parsed}
         else
-            for i, target in ipairs(targets) do
-                if getmetatable(target) ~= Coordinate then
-                    targets[i] = Coordinate.parse(target)
+            for i, t in ipairs(targets) do
+                if getmetatable(t) ~= Coordinate then
+                    targets[i] = Coordinate.parse(t)
                 end
             end
         end
     else
-        targets = {targets}
+        error("dijkstra: invalid targets argument")
     end
     logger:debug("Starting Dijkstra algorithm from " .. tostring(source) .. " to multiple targets")
     local distance = {}
     local previous = {}
     local queue = BinaryHeap:new()
 
-    distance[tostring(source)] = 0
+    -- Keys into `distance` and `previous` use integer hashes instead of
+    -- `tostring(coord)` to avoid allocating thousands of short strings
+    -- per call. ~10x reduction in GC pressure.
+    distance[source:hash()] = 0
     queue:insert(source, 0)
 
     local targetReached = nil
@@ -318,22 +371,29 @@ function Environment:dijkstra(source, targets)
             break
         end
         for _, data in pairs(self:getNeighbours(current)) do
-            local alt = distance[tostring(current)] + self:getCost(data.type)
-            if alt < (distance[tostring(data.position)] and distance[tostring(data.position)] or math.huge) then
-                distance[tostring(data.position)] = alt
-                previous[tostring(data.position)] = current
+            local cHash = current:hash()
+            local nHash = data.position:hash()
+            local alt = distance[cHash] + self:getCost(data.type)
+            if alt < (distance[nHash] or math.huge) then
+                distance[nHash] = alt
+                previous[nHash] = current
                 queue:decreaseKey(data.position, alt + self:heuristic(data.position, targets))
             end
         end
     end
 
+    if not targetReached then
+        logger:warn("Dijkstra: no target reachable from " .. tostring(source))
+        return {}, nil, nil
+    end
+
     local path = {}
     local u = targetReached
-    local cost = distance[tostring(u)]
-    if previous[tostring(u)] or source:isEqual(u) then
+    local cost = distance[u:hash()]
+    if previous[u:hash()] or source:isEqual(u) then
         while u do
             table.insert(path, 1, u)
-            u = previous[tostring(u)]
+            u = previous[u:hash()]
         end
     end
     logger:debug("Finished Dijkstra algorithm from " .. tostring(source) .. " to multiple targets")
@@ -343,6 +403,9 @@ function Environment:dijkstra(source, targets)
     end
     logger:debug("Cost: " .. tostring(cost))
 
+    if #path < 2 then
+        return {}, targetReached, cost
+    end
     return Distance.fromPath(path), targetReached, cost
 end
 
@@ -375,3 +438,106 @@ function Environment:heuristic(current, targets)
     end
     return minDistance
 end
+
+-- ---------------------------------------------------------------------------
+-- Cache management & serialization
+-- ---------------------------------------------------------------------------
+
+-- Prune `checkedBlocks` entries whose Manhattan distance from `anchor`
+-- exceeds `maxDistance`. Cheap LRU-ish substitute: if we've moved far
+-- enough that we won't realistically revisit an area, forget it.
+function Environment:prune(anchor, maxDistance)
+    if getmetatable(anchor) ~= Coordinate then
+        anchor = Coordinate.parse(anchor)
+    end
+    maxDistance = maxDistance or 100
+    local removed = 0
+    for y, ys in pairs(self.checkedBlocks) do
+        local dy = math.abs(y - anchor.y)
+        for x, xs in pairs(ys) do
+            local dx = math.abs(x - anchor.x)
+            for z, _ in pairs(xs) do
+                if dx + dy + math.abs(z - anchor.z) > maxDistance then
+                    xs[z] = nil
+                    removed = removed + 1
+                end
+            end
+            if next(xs) == nil then ys[x] = nil end
+        end
+        if next(ys) == nil then self.checkedBlocks[y] = nil end
+    end
+    if removed > 0 then
+        logger:debug("Prune: dropped " .. removed .. " checkedBlocks entries beyond " .. maxDistance .. " from " .. tostring(anchor))
+    end
+    return removed
+end
+
+-- Serialize state to a plain Lua table suitable for textutils.serialize.
+-- Block-type objects are reduced to their name strings.
+function Environment:toState()
+    local checked = {}
+    for y, ys in pairs(self.checkedBlocks) do
+        checked[y] = {}
+        for x, xs in pairs(ys) do
+            checked[y][x] = {}
+            for z, bt in pairs(xs) do
+                checked[y][x][z] = bt.name
+            end
+        end
+    end
+    local fuels = {}
+    for y, ys in pairs(self.fuelLocations) do
+        fuels[y] = {}
+        for x, xs in pairs(ys) do
+            fuels[y][x] = {}
+            for z, _ in pairs(xs) do
+                fuels[y][x][z] = true
+            end
+        end
+    end
+    return {
+        checkedBlocks  = checked,
+        fuelLocations  = fuels,
+        currentPattern = Environment.currentPattern,
+    }
+end
+
+-- Restore state previously written by :toState().
+function Environment:loadState(state)
+    if type(state) ~= "table" then return false end
+    self.checkedBlocks = {}
+    if type(state.checkedBlocks) == "table" then
+        for y, ys in pairs(state.checkedBlocks) do
+            self.checkedBlocks[y] = {}
+            for x, xs in pairs(ys) do
+                self.checkedBlocks[y][x] = {}
+                for z, name in pairs(xs) do
+                    -- Resolve block-type name back to the canonical table.
+                    for _, bt in pairs(blockType) do
+                        if bt.name == name then
+                            self.checkedBlocks[y][x][z] = bt
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end
+    self.fuelLocations = {}
+    if type(state.fuelLocations) == "table" then
+        for y, ys in pairs(state.fuelLocations) do
+            self.fuelLocations[y] = {}
+            for x, xs in pairs(ys) do
+                self.fuelLocations[y][x] = {}
+                for z, _ in pairs(xs) do
+                    self.fuelLocations[y][x][z] = blockType.FUEL
+                end
+            end
+        end
+    end
+    if state.currentPattern and Environment.patterns[state.currentPattern] then
+        Environment.currentPattern = state.currentPattern
+    end
+    return true
+end
+

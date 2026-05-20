@@ -33,14 +33,36 @@ function getMethodNameForDirection(method, direction)
     end
 end
 
-BetterTurtle = {
-    position = Coordinate:new(0, 0, 0, directions.forward), -- Use Coordinate for position
-    direction = directions.forward
-}
+BetterTurtle = {}
+
+function BetterTurtle:new(o)
+    o = o or {}
+    -- Copy all methods from the turtle table to o so the user can call
+    -- e.g. betterTurtle.select(1) directly.
+    if turtle then
+        for k, v in pairs(turtle) do
+            o[k] = v
+        end
+    end
+    -- IMPORTANT: give each instance its own position/direction. Previously
+    -- these lived on the class table and were shared across all instances
+    -- until the first mutation, which broke unit tests and made multi-turtle
+    -- testing impossible.
+    o.position  = o.position  or Coordinate:new(0, 0, 0, directions.forward)
+    o.direction = o.direction or directions.forward
+    setmetatable(o, self)
+    self.__index = self
+    return o
+end
 
 function BetterTurtle:turn(direction)
     if getmetatable(direction) ~= Direction then
         direction = directions.getDirectionFromName(direction)
+    end
+    -- up/down/any are not rotational directions; do not change facing
+    if direction == directions.up or direction == directions.down or direction == directions.any then
+        logger:trace("Skipping turn for non-rotational direction: " .. direction.name)
+        return 0
     end
     logger:debug("Turning to " .. direction.name)
     logger:trace(self.direction.name .. " --> " .. direction.name)
@@ -60,11 +82,17 @@ function BetterTurtle:turn(direction)
 end
 
 function BetterTurtle:relativeToGlobalDirection(direction)
+    -- up/down are absolute vertical directions, regardless of turtle facing
+    if direction == directions.up or direction == directions.down then
+        logger:trace("Vertical direction " .. direction.name .. " is already absolute")
+        return direction
+    end
     local globalOffset = self.direction.num
     local relativeOffset = direction.num
     logger:trace("Turtle's current direction: " .. self.direction.name)
     logger:trace("Relative direction: " .. direction.name)
-    if direction.num == 0 then
+    -- relative forward (and any) maps to whatever the turtle is currently facing
+    if direction == directions.forward or direction == directions.any then
         return self.direction
     end
     return directions.getDirectionFromNum((relativeOffset + globalOffset) % 4)
@@ -83,17 +111,6 @@ function BetterTurtle:relativeTurn(direction)
     return self:turn(self:relativeToGlobalDirection(direction))
 end
 
-function BetterTurtle:new(o)
-    o = o or {}
-    -- Copy all methods from the turtle table to o
-    for k, v in pairs(turtle) do
-        o[k] = v
-    end
-    -- Set the metatable of o to BetterTurtle
-    setmetatable(o, self)
-    self.__index = self
-    return o
-end
 
 function BetterTurtle:actionInDirection(action, direction)
     if getmetatable(direction) ~= Direction then
@@ -183,7 +200,9 @@ function BetterTurtle:move(direction, force, relative)
     movementVector = globDirection.vector
 
     if relativeDirection == directions.back then
-        movementVector = movementVector * -1
+        -- Use turtle.back() to move without turning around.
+        -- globDirection already points to the cell behind the turtle,
+        -- so globDirection.vector is the correct world delta - do NOT negate.
         moveMethodName = "back"
     end
 
@@ -283,4 +302,35 @@ function BetterTurtle:moveDistance(distance)
             end
         end
     end
+    return true
 end
+
+--[[
+Dig the block directly above the turtle's current position. Used to
+turn 1-tall mining corridors into 2-tall passages a player can walk.
+Returns true if there was a block to dig (or no block - i.e. the call
+was a no-op), false if the dig attempt failed (e.g. bedrock).
+--]]
+function BetterTurtle:digCorridorCeiling()
+    if not turtle.detectUp() then return true end
+    return turtle.digUp() and true or false
+end
+
+--[[
+Stack-aware inventory fullness check. Returns true if the turtle still has
+storage capacity for an arbitrary new item - i.e. at least one slot is
+either empty, or has fewer items than the stack maximum.
+
+This is more accurate than just looking for empty slots: a turtle with
+14 nearly-full stacks of cobble can still hold a single diamond.
+--]]
+function BetterTurtle:hasInventoryCapacity()
+    for i = 1, 14 do
+        local count = self.getItemCount(i)
+        if count == 0 then return true end
+        local space = self.getItemSpace and self.getItemSpace(i)
+        if space and space > 0 then return true end
+    end
+    return false
+end
+
